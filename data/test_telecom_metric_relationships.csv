@@ -1,0 +1,5 @@
+metric_a,relationship_type,metric_b,reasoning
+Wireless Port Out,increases the value of,Wireless Churn Rate,"When more customers transfer their phone number to another carrier (Wireless Port Out), the percentage of subscribers who cancel or did not renew their subscriptions (Wireless Churn Rate) increases."
+Wireless Port In,positively impacts,Wireless Net Adds - New customers,"When more new customers transfer their existing phone number from another carrier (Wireless Port In), the net increase in new wireless customers (Wireless Net Adds - New customers) is positively impacted."
+Average Call handling Time - Service,negatively impacts,NPS Score,"Longer call handling times (Average Call handling Time - Service) can lead to customer dissatisfaction, negatively impacting the Net Promoter Score (NPS Score)."
+Wireless Net Adds - Add a Line (AAL),positively impacts,Wireless Net Adds,"When existing customers add new lines to their accounts (Wireless Net Adds - Add a Line), the net change in wireless subscribers (Wireless Net Adds) increases."

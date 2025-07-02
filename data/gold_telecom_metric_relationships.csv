@@ -1,0 +1,15 @@
+metric_a,relationship_type,metric_b,reasoning
+Wireless Port In,positively impacts,Wireless Net Adds - New customers,"More port ins often result in a higher number of new customers, thus increasing net adds."
+Wireless Net Adds - Add a Line (AAL),positively impacts,Wireless Net Adds,More lines added by existing customers increase the total net adds.
+Average Call handling Time - Service,negatively impacts,NPS Score,"Longer call handling times may lead to lower customer satisfaction, thus decreasing NPS Score."
+ARPU (Average Revenue Per User),negatively impacts,Wireless Churn Rate,"Higher ARPU often reflects customer satisfaction and loyalty, thus reducing churn rate."
+Wireless Net Adds - New customers,related metric,Wireless Net Adds,Both metrics are related to the net increase in wireless customers.
+Wireless Net Adds - Add a Line (AAL),related metric,Wireless Net Adds,Both metrics are related to the net increase in wireless customers.
+Wireless Port Out,related metric,Wireless Churn Rate,Both metrics are related to customer retention and churn.
+
+Wireless Port Out,increases the value of,wireless churn rate,"when more customers transfer their phone number to another carrier (port out), the churn rate increases as more subscribers are leaving."
+wireless net adds - add a line (aal),positively impacts,arpu (average revenue per user),"when existing customers add more lines (aal), the average revenue per user (arpu) increases as more services are being used."
+number of customers with autopay discount,decreases the value of,wireless churn rate,"customers enrolled in autopay with a discount are less likely to cancel or not renew their subscriptions, reducing the churn rate."
+wireless net adds - add a line (aal),positively impacts,wireless net adds,more lines added by existing customers increase the total net adds.
+arpu (average revenue per user),negatively impacts,wireless churn rate,"higher arpu often reflects customer satisfaction and loyalty, thus reducing churn rate."
+wireless port out,related metric,wireless churn rate,both metrics are related to customer retention and churn.
