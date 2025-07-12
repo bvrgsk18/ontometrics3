@@ -2,7 +2,7 @@ import argparse
 import os, uuid, pandas as pd, json, csv
 from neo4j import GraphDatabase
 # Make sure your config.py is correctly set up in the same directory
-from config import NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
+from config import *
 
 # --- Neo4j Driver ---
 driver = GraphDatabase.driver(
@@ -15,108 +15,108 @@ driver = GraphDatabase.driver(
 )
 
 # --- Node Creation Logic ---
+# NEW: Function to create constraints (indexes)
+def create_constraints(driver):
+    with driver.session() as session:
+        # Constraint for MetricData nodes on critical merge fields
+        # This creates a composite unique constraint and an automatic index
+        session.run("""
+            CREATE CONSTRAINT IF NOT EXISTS FOR (m:MetricData)
+            REQUIRE (m.metric_name, m.rpt_mth, m.rpt_year, m.product_name, m.service_type, m.region) IS UNIQUE
+        """)
+        # Create an index on Metric name for faster lookup
+        session.run("""
+            CREATE INDEX IF NOT EXISTS FOR (m:Metric) ON (m.name)
+        """)
+        print("✅ Constraints and Indexes created.")
+
+
 def batch_create_nodes(tx, batch):
     created_metric_data_count = 0
     skipped_rows_count = 0
 
     # Define the fields critical for the MetricData MERGE clause
-    # CHANGED: 'product_type' to 'product_name'
     CRITICAL_MERGE_FIELDS = ["metric_name", "rpt_mth", "rpt_year", "product_name", "service_type", "region"]
 
+    # Prepare data for UNWIND
+    unwind_data = []
     for row_idx, row in enumerate(batch):
         processed_row = {}
         for k, v in row.items():
             key_stripped = k.strip()
-            # Ensure None is truly None, not an empty string or 'nan' string
             if isinstance(v, str):
                 temp_v = v.strip()
                 processed_row[key_stripped] = None if not temp_v or temp_v.lower() == 'nan' else temp_v
-            elif pd.isna(v): # Catches numpy.nan, None, etc.
+            elif pd.isna(v):
                 processed_row[key_stripped] = None
             else:
                 processed_row[key_stripped] = v
 
-        # Extract values for the MERGE clause directly
-        metric_name = processed_row.get("metric_name")
-        rpt_mth = processed_row.get("rpt_mth")
-        rpt_year = int(processed_row.get("rpt_year"))
-        product_name = processed_row.get("product_name") # CHANGED: Used product_name
-        service_type = processed_row.get("service_type")
-        region = processed_row.get("region")
-        metric_value = processed_row.get("metric_value") # Used in SET clause, not MERGE for MetricData
+        # Add 'id' if not present or null, and ensure rpt_year is int
+        if "id" not in processed_row or processed_row["id"] is None:
+            processed_row["id"] = str(uuid.uuid4())
+        try:
+            if processed_row.get("rpt_year") is not None:
+                processed_row["rpt_year"] = int(processed_row["rpt_year"])
+        except (ValueError, TypeError):
+            processed_row["rpt_year"] = None # Set to None if conversion fails
 
-        # --- ULTIMATE DEBUGGING POINT FOR MERGE FIELDS ---
-        print(f"\n🔬 Processing Batch Row {row_idx + 1} for MERGE (MetricData):")
-        
-        # Build the parameters exactly as they'd be passed to Cypher for MetricData MERGE
-        metric_data_merge_params = {
-            "metric_name": metric_name,
-            "rpt_mth": rpt_mth,
-            "rpt_year": rpt_year,
-            "product_name": product_name, # CHANGED: Used product_name
-            "service_type": service_type,
-            "region": region
-        }
-
+        # Check for missing critical fields before adding to unwind_data
         missing_fields_current_row = []
-        for field, value in metric_data_merge_params.items():
-            print(f"   {field}: '{value}' (Type: {type(value)})")
-            if value is None or (isinstance(value, str) and not value.strip()):
+        for field in CRITICAL_MERGE_FIELDS:
+            if processed_row.get(field) is None or (isinstance(processed_row.get(field), str) and not processed_row.get(field).strip()):
                 missing_fields_current_row.append(field)
-        
+
         if missing_fields_current_row:
-            print(f"❌ Skipping row - Missing or empty critical MERGE fields for MetricData: {', '.join(missing_fields_current_row)}.")
-            print(f"   Full row data received by batch_create_nodes: {processed_row}")
+            print(f"❌ Skipping row {row_idx + 1} - Missing or empty critical MERGE fields for MetricData: {', '.join(missing_fields_current_row)}. Full row data: {processed_row}")
             skipped_rows_count += 1
             continue
         else:
-            print("✅ All critical MERGE fields for MetricData are present and non-empty.")
+            unwind_data.append(processed_row)
 
+    if not unwind_data:
+        print("No valid rows to process in this batch after initial checks.")
+        return 0, 0
 
-        # Prepare the full record for the Cypher query
-        record = {
-            "metric_name": metric_name,
-            "rpt_mth": rpt_mth,
-            "rpt_year": rpt_year,
-            "product_name": product_name, # CHANGED: Used product_name
-            "service_type": service_type,
-            "region": region,
-            "metric_value": metric_value, # This can be None, as it's set later.
-            "id": processed_row.get("id") or str(uuid.uuid4())
-        }
+    # Cypher query with UNWIND for batch processing
+    query = """
+    UNWIND $rows AS row
+    // MERGE for Metric node
+    MERGE (m:Metric {name: row.metric_name})
 
-        query = """
-        // MERGE for Metric node (this seems to be working for you)
-        MERGE (m:Metric {name: $metric_name})
-
-        // MERGE for MetricData node (the problematic one)
-        MERGE (d:MetricData {
-            metric_name: $metric_name, 
-            rpt_mth: $rpt_mth,
-            rpt_year: $rpt_year,
-            product_name: $product_name, // CHANGED: Used product_name in MERGE
-            service_type: $service_type,
-            region: $region
-        })
-        // SET properties that are not part of the MERGE identity
-        SET d.metric_value = $metric_value,
-            d.id = $id
-        
-        // Relationship between Metric and MetricData
-        MERGE (m)-[:HAS_DATA]->(d)
-        """
-        try:
-            tx.run(query, **record)
-            created_metric_data_count += 1
-            print(f"✅ Successfully processed MetricData node for: {metric_name} | {rpt_mth}/{rpt_year} | {product_name}/{service_type}/{region}")
-        except Exception as e:
-            print(f"❌ Error during Cypher execution for row (MERGE params passed, but Cypher error): {record}. Error: {e}")
-            skipped_rows_count += 1
+    // MERGE for MetricData node
+    MERGE (d:MetricData {
+        metric_name: row.metric_name,
+        rpt_mth: row.rpt_mth,
+        rpt_year: row.rpt_year,
+        product_name: row.product_name,
+        service_type: row.service_type,
+        region: row.region
+    })
+    // SET properties that are not part of the MERGE identity
+    ON CREATE SET d.metric_value = row.metric_value,
+                  d.id = row.id
+    ON MATCH SET d.metric_value = row.metric_value // Update value on match
     
+    // Relationship between Metric and MetricData
+    MERGE (m)-[:HAS_DATA]->(d)
+    """
+    try:
+        result = tx.run(query, rows=unwind_data)
+        # Assuming all rows in unwind_data were processed if no exception
+        created_metric_data_count = len(unwind_data)
+        print(f"✅ Successfully processed {created_metric_data_count} MetricData nodes in this batch using UNWIND.")
+    except Exception as e:
+        print(f"❌ Error during Cypher UNWIND execution for batch. Error: {e}")
+        # If an error occurs for the entire batch, all are considered skipped for this purpose.
+        skipped_rows_count += len(unwind_data)
+        
     print(f"\n--- Batch Summary ---")
     print(f"Nodes successfully created/merged in this batch: {created_metric_data_count}")
     print(f"Rows skipped in this batch: {skipped_rows_count}")
     print(f"---------------------\n")
+    
+    return created_metric_data_count, skipped_rows_count
 
 
 # --- CSV Reader for Metric + MetricData ---
@@ -134,31 +134,22 @@ def create_metric_data_nodes(file_path, driver, batch_size=500):
         df.columns = df.columns.str.strip() # Strip whitespace from column names
         print(f"Columns after stripping whitespace: {df.columns.tolist()}")
 
-        # CHANGED: 'product_type' to 'product_name' in CRITICAL_MERGE_FIELDS
         CRITICAL_MERGE_FIELDS = ["metric_name", "rpt_mth", "rpt_year", "product_name", "service_type", "region"]
         ALL_EXPECTED_COLUMNS = CRITICAL_MERGE_FIELDS + ["metric_value", "id","summary"] # All columns we care about
 
-        # Aggressive cleaning: Iterate through each cell of the relevant columns
         for col in ALL_EXPECTED_COLUMNS:
             if col in df.columns:
-                # Convert everything to string first to handle all data types consistently
                 df[col] = df[col].astype(str)
-                # Apply strip, then replace empty string or 'nan' string with None
                 df[col] = df[col].apply(lambda x: x.strip() if isinstance(x, str) else x)
-                # Handle empty strings, strings that are just whitespace, or 'nan' string
                 df[col] = df[col].apply(lambda x: None if (isinstance(x, str) and (not x or x.lower() == 'nan')) else x)
-                # After this, explicit pandas NaN values should also be None
                 df[col] = df[col].where(pd.notna, None)
             else:
-                # This warning is now very specific. It will only fire if you modify
-                # CRITICAL_MERGE_FIELDS to include a column name NOT in the CSV.
                 print(f"  WARNING: Expected column '{col}' not found in CSV. This might cause issues for {col}.")
 
         print(f"\nDataFrame head after aggressive cleaning:\n{df.head().to_string()}")
         print(f"DataFrame info after aggressive cleaning:\n")
         df.info()
 
-        # Final check for nulls in critical MERGE columns after cleaning
         print("\nChecking for Nulls in Critical MERGE Columns after aggressive cleaning and before filtering:")
         for field in CRITICAL_MERGE_FIELDS:
             if field in df.columns:
@@ -167,9 +158,8 @@ def create_metric_data_nodes(file_path, driver, batch_size=500):
                     print(f"  Field '{field}' has {null_count} null values out of {len(df)} rows.")
             else:
                 print(f"  CRITICAL ERROR: Merge field '{field}' is specified but NOT FOUND in your CSV columns! Please check CSV headers. All MetricData nodes will be skipped.")
-                return # Exit early if a required column is missing
+                return
 
-        # Filter out rows where any critical MERGE field is None
         initial_row_count = len(df)
         df_filtered = df.dropna(subset=CRITICAL_MERGE_FIELDS, how='any')
         
@@ -178,31 +168,27 @@ def create_metric_data_nodes(file_path, driver, batch_size=500):
             print(f"⚠️ {rows_removed_by_filter} rows removed because one or more critical MERGE fields were NULL after cleaning.")
             if rows_removed_by_filter == initial_row_count:
                 print("❌ All rows filtered out. No data left to process for MetricData. Check your CSV data integrity.")
-                return # No data left to process
+                return
         else:
              print("✅ No rows were removed by the final null-check filter for critical MERGE fields. Data looks good for processing.")
 
-        df = df_filtered # Use the filtered DataFrame
+        df = df_filtered
 
         if df.empty:
             print("❌ No rows remaining in DataFrame after filtering critical fields. Exiting.")
             return
 
-        # Ensure 'id' column exists and has unique values
         if "id" not in df.columns or df["id"].isnull().all():
             print("Adding/Replacing 'id' column with UUIDs as it's missing or all null.")
             df["id"] = [str(uuid.uuid4()) for _ in range(len(df))]
         else:
-            # If 'id' exists, ensure it's unique if intended as a unique ID
-            # This logic needs to be careful not to change existing IDs unnecessarily.
-            # Only generate for rows where 'id' is currently null or a duplicate.
             temp_ids = []
             seen_ids = set()
             for existing_id in df['id']:
                 if pd.isna(existing_id) or existing_id in seen_ids:
                     new_id = str(uuid.uuid4())
                     temp_ids.append(new_id)
-                    seen_ids.add(new_id) # Add new UUID to seen set
+                    seen_ids.add(new_id)
                 else:
                     temp_ids.append(existing_id)
                     seen_ids.add(existing_id)
@@ -272,7 +258,7 @@ def apply_relationships(csv_path, driver):
     relationships_skipped_count = 0
 
     with driver.session() as session:
-        for i, rel_data in enumerate(rels): # Renamed 'rel' to 'rel_data' for clarity
+        for i, rel_data in enumerate(rels):
             try:
                 a = rel_data.get("metric_a")
                 b = rel_data.get("metric_b")
@@ -344,10 +330,13 @@ if __name__ == "__main__":
     try:
         _ = NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
     except NameError:
-        print("❌ Error: NEO4J_URI, NEO4J_USERNAME, or NEO4J_PASSWORD not found.")
+        print("❌ Error: NEO44J_URI, NEO4J_USERNAME, or NEO4J_PASSWORD not found.")
         print("Please ensure you have a 'config.py' file in the same directory as this script,")
         print("with variables like NEO4J_URI = 'bolt://localhost:7687', NEO4J_USERNAME = 'neo4j', etc.")
         exit()
+
+    # NEW: Create constraints and indexes before data import
+    create_constraints(driver)
 
     print("🚀 Creating Metric and MetricData nodes...")
     create_metric_data_nodes(data_file, driver)

@@ -6,10 +6,24 @@ import argparse
 import json
 import os
 import itertools # For generating combinations
+import numpy as np # For pd.notna
 
 # Ensure config directory exists and create dummy config files if they don't
 config_dir = "config"
 os.makedirs(config_dir, exist_ok=True)
+
+# Create dummy config files if they don't exist
+# regions.json
+regions_path = os.path.join(config_dir, "regions.json")
+
+# products.json
+products_path = os.path.join(config_dir, "products.json")
+
+# metrics.json
+metrics_path = os.path.join(config_dir, "metrics.json")
+
+# unique_columns.json
+unique_columns_path = os.path.join(config_dir, "unique_columns.json")
 
 
 # Load configurations
@@ -98,8 +112,8 @@ def generate_data_for_month(year: int, month: int, target_rows_per_month=5000):
         "Wireless Gross Adds",
         "Wireless Disconnects",
         "Wireless Net Adds",
-        "Wireless Net Adds - Add a Line (AAL)", # Corrected to match metrics.json
-        "Wireless Net Adds - New customers" # Corrected to match metrics.json
+        "Wireless Net Adds - Add a Line (AAL)",
+        "Wireless Net Adds - New customers"
     ]
 
     # Define new metric groups for business rules
@@ -157,8 +171,8 @@ def generate_data_for_month(year: int, month: int, target_rows_per_month=5000):
                     "Wireless Gross Adds": wg_adds,
                     "Wireless Disconnects": w_disconnects,
                     "Wireless Net Adds": wn_adds,
-                    "Wireless Net Adds - Add a Line (AAL)": wn_adds_addaline, # Corrected key
-                    "Wireless Net Adds - New customers": wn_adds_newcustomers # Corrected key
+                    "Wireless Net Adds - Add a Line (AAL)": wn_adds_addaline,
+                    "Wireless Net Adds - New customers": wn_adds_newcustomers
                 }
             
             # Assign value from the pre-calculated wireless_metrics_data
@@ -175,58 +189,46 @@ def generate_data_for_month(year: int, month: int, target_rows_per_month=5000):
                 temp_component_values = {}
                 remaining_value = parent_value
                 
-                # Assign initial random values ensuring they don't exceed their max range
-                # and sum up to at most parent_value
                 for i, component_metric in enumerate(customer_trouble_tickets_components):
                     comp_range = config.metrics_info[component_metric]["range"]
-                    # Generate a value that is within component's range and remaining_value
-                    # This ensures we don't over-allocate before the last component
                     if i < len(customer_trouble_tickets_components) - 1:
-                        # For all but the last component, ensure we leave enough for others to meet their min
-                        # and don't take too much
                         min_for_others = sum(config.metrics_info[c]["range"][0] for c in customer_trouble_tickets_components[i+1:])
                         max_possible_for_this = min(comp_range[1], remaining_value - min_for_others)
                         
-                        if max_possible_for_this < comp_range[0]: # If cannot meet min for others, adjust this one to its min
+                        if max_possible_for_this < comp_range[0]:
                             comp_val = comp_range[0]
                         else:
                             comp_val = random.randint(comp_range[0], max(comp_range[0], max_possible_for_this))
-                    else: # Last component takes the rest, clamped by its range
+                    else:
                         comp_val = max(comp_range[0], min(comp_range[1], remaining_value))
                     
                     temp_component_values[component_metric] = comp_val
                     remaining_value -= comp_val
-                    if remaining_value < 0: remaining_value = 0 # Should not happen with proper calculation
+                    if remaining_value < 0: remaining_value = 0
 
-                # After initial distribution, adjust if the sum doesn't match parent_value
                 current_sum = sum(temp_component_values.values())
                 difference = parent_value - current_sum
 
                 if difference != 0:
-                    # Distribute difference proportionally or randomly
-                    # For simplicity, let's distribute evenly if possible, otherwise randomly to one
-                    if difference > 0: # Need to add
-                        # Add to components that are not at their max
+                    if difference > 0:
                         addable_components = [c for c in customer_trouble_tickets_components if temp_component_values[c] < config.metrics_info[c]["range"][1]]
                         if addable_components:
-                            random.shuffle(addable_components) # Randomize distribution
+                            random.shuffle(addable_components)
                             for comp in addable_components:
                                 add_amount = min(difference, config.metrics_info[comp]["range"][1] - temp_component_values[comp])
                                 temp_component_values[comp] += add_amount
                                 difference -= add_amount
                                 if difference == 0: break
-                    elif difference < 0: # Need to subtract
-                        # Subtract from components that are not at their min
+                    elif difference < 0:
                         subtractable_components = [c for c in customer_trouble_tickets_components if temp_component_values[c] > config.metrics_info[c]["range"][0]]
                         if subtractable_components:
                             random.shuffle(subtractable_components)
                             for comp in subtractable_components:
                                 subtract_amount = min(abs(difference), temp_component_values[comp] - config.metrics_info[comp]["range"][0])
                                 temp_component_values[comp] -= subtract_amount
-                                difference += subtract_amount # difference becomes less negative
+                                difference += subtract_amount
                                 if difference == 0: break
                 
-                # Final check and clamp if due to rounding/distribution issues values went out of range
                 for comp_metric in customer_trouble_tickets_components:
                     comp_range = config.metrics_info[comp_metric]["range"]
                     temp_component_values[comp_metric] = max(comp_range[0], min(comp_range[1], temp_component_values[comp_metric]))
@@ -361,252 +363,215 @@ if __name__ == "__main__":
     rows_after_full_dedup = len(full_df_monthly)
     print(f"\nRemoved {initial_full_rows - rows_after_full_dedup} duplicate rows from combined monthly data. Remaining rows: {rows_after_full_dedup}")
     
-    # --- Generate Monthly Product & Service Type Summaries (with region as month name) ---
-    print(f"\n--- Generating Monthly Product & Service Type Summaries for {args.year} (Region=Month) ---")
 
-    monthly_prod_service_summary_group_cols = [
-        "product_name",
-        "service_type",
-        "rpt_mth", # This will also become the 'region'
-        "rpt_year",
-        "metric_name",
-        "high_or_low_better"
-    ]
+    all_generated_dfs = [full_df_monthly] # Start with granular data
 
-    # Dynamically apply 'sum' or 'mean' based on metric_name's rollup
-    monthly_prod_service_summary_dfs = []
-    for metric_name in full_df_monthly['metric_name'].unique():
-        rollup_func = get_rollup_function(metric_name, config.metrics_info)
-        df_filtered = full_df_monthly[full_df_monthly['metric_name'] == metric_name]
-        if not df_filtered.empty:
-            aggregated_df = df_filtered.groupby(monthly_prod_service_summary_group_cols, as_index=False).agg(
-                metric_value=('metric_value', rollup_func)
-            )
-            monthly_prod_service_summary_dfs.append(aggregated_df)
-    
-    df_monthly_prod_service_summary = pd.concat(monthly_prod_service_summary_dfs, ignore_index=True) if monthly_prod_service_summary_dfs else pd.DataFrame()
-    if not df_monthly_prod_service_summary.empty:
-        df_monthly_prod_service_summary['region'] = df_monthly_prod_service_summary['rpt_mth'] # Region is the month name
-        df_monthly_prod_service_summary['data_type'] = "Monthly_Prod_Service_Summary"
-        df_monthly_prod_service_summary['load_ts'] = datetime.datetime.now().isoformat()
-        df_monthly_prod_service_summary['summary'] = df_monthly_prod_service_summary.apply(
-            lambda row: f"""{row['product_name']} {row['service_type']} in {row['region']} of {row['rpt_year']} has a total metric of {row['metric_name']} with a value of {row['metric_value']:.2f}, where {row['high_or_low_better']} (Monthly Product & Service Summary)""",
-            axis=1
-        )
+    # Helper function to generate summaries
+    def generate_summaries(df, dimensions_to_group_by, data_type_suffix, static_labels=None):
+        summaries = []
+        if df.empty:
+            return pd.DataFrame()
 
+        load_ts = datetime.datetime.now().isoformat()
+        
+        # Ensure all dimensions_to_group_by are present in the DataFrame
+        for dim in dimensions_to_group_by:
+            if dim not in df.columns:
+                df[dim] = None # Add missing columns
 
-    # --- Generate Quarterly Product & Service Type Summaries (with region as quarter name) ---
-    print(f"\n--- Generating Quarterly Product & Service Type Summaries for {args.year} (Region=Quarter) ---")
-    
+        for metric_name in df['metric_name'].unique():
+            rollup_func = get_rollup_function(metric_name, config.metrics_info)
+            df_metric_filtered = df[df['metric_name'] == metric_name].copy()
+
+            if not df_metric_filtered.empty:
+                # Group by the specified dimensions and fixed metric columns
+                aggregated_df = df_metric_filtered.groupby(
+                    dimensions_to_group_by + ["metric_name", "high_or_low_better"], 
+                    as_index=False
+                ).agg(metric_value=('metric_value', rollup_func))
+
+                # Apply static labels (e.g., "All Products", "All Regions")
+                if static_labels:
+                    for col, val in static_labels.items():
+                        # Ensure column exists before assigning, create if not
+                        if col not in aggregated_df.columns:
+                            aggregated_df[col] = None 
+                        aggregated_df[col] = val
+                
+                aggregated_df['data_type'] = data_type_suffix
+                aggregated_df['load_ts'] = load_ts
+                
+                # Dynamic summary generation
+                # Ensure all columns used in summary_base exist, even if they are None/NaN
+                for col in ['product_name', 'service_type', 'region', 'rpt_mth', 'quarter_temp', 'rpt_year']:
+                    if col not in aggregated_df.columns:
+                        aggregated_df[col] = None
+
+                aggregated_df['summary_base'] = aggregated_df.apply(lambda row: ' '.join(filter(None, [
+                    f"Product '{row['product_name']}'" if 'product_name' in row and pd.notna(row['product_name']) and row['product_name'] != "All Products" else "All Products",
+                    f"Service '{row['service_type']}'" if 'service_type' in row and pd.notna(row['service_type']) and row['service_type'] != "All Services" else "All Services",
+                    f"Region '{row['region']}'" if 'region' in row and pd.notna(row['region']) and row['region'] != "All Regions" else "All Regions",
+                    # Conditional time dimension based on data_type_suffix
+                    (f"Month '{row['rpt_mth']}'" if 'rpt_mth' in row and pd.notna(row['rpt_mth']) and "Monthly" in data_type_suffix else None),
+                    (f"Quarter '{row['rpt_mth']}'" if 'rpt_mth' in row and pd.notna(row['rpt_mth']) and "Quarterly" in data_type_suffix else None),
+                    f"Year '{row['rpt_year']}'" if 'rpt_year' in row and pd.notna(row['rpt_year']) else None
+                ])), axis=1)
+
+                aggregated_df['summary'] = aggregated_df.apply(
+                    lambda row: f"""{row['summary_base'].strip()} has a total metric of {row['metric_name']} with a value of {row['metric_value']:.2f}, where {row['high_or_low_better']} ({data_type_suffix})""",
+                    axis=1
+                )
+                aggregated_df.drop(columns=['summary_base'], inplace=True)
+                summaries.append(aggregated_df)
+        return pd.concat(summaries, ignore_index=True) if summaries else pd.DataFrame()
+
     # Create a temporary df for quarterly aggregation to add 'quarter_temp'
-    temp_df_for_quarterly_prod_service_agg = full_df_monthly.copy()
-    if not temp_df_for_quarterly_prod_service_agg.empty:
-        temp_df_for_quarterly_prod_service_agg['quarter_temp'] = temp_df_for_quarterly_prod_service_agg['rpt_mth'].apply(
+    temp_df_for_quarterly_agg = full_df_monthly.copy()
+    if not temp_df_for_quarterly_agg.empty:
+        temp_df_for_quarterly_agg['quarter_temp'] = temp_df_for_quarterly_agg['rpt_mth'].apply(
             lambda x: get_quarter_name(datetime.datetime.strptime(x, '%B').month)
         )
 
-    quarterly_prod_service_summary_group_cols = [
-        "product_name",
-        "service_type",
-        "quarter_temp", # This will become the 'region'
-        "rpt_year",
-        "metric_name",
-        "high_or_low_better"
-    ]
+    # Get all unique service types across all products for "All Products - Individual Service" drill-down
+    all_unique_service_types = set()
+    for services_list in config.products.values():
+        all_unique_service_types.update(services_list)
+    all_unique_service_types = sorted(list(all_unique_service_types)) # Sort for consistent order
 
-    # Dynamically apply 'sum' or 'mean' based on metric_name's rollup
-    quarterly_prod_service_summary_dfs = []
-    if not full_df_monthly.empty:
-        for metric_name in temp_df_for_quarterly_prod_service_agg['metric_name'].unique():
-            rollup_func = get_rollup_function(metric_name, config.metrics_info)
-            df_filtered = temp_df_for_quarterly_prod_service_agg[temp_df_for_quarterly_prod_service_agg['metric_name'] == metric_name]
-            if not df_filtered.empty:
-                aggregated_df = df_filtered.groupby(quarterly_prod_service_summary_group_cols, as_index=False).agg(
-                    metric_value=('metric_value', rollup_func)
-                )
-                quarterly_prod_service_summary_dfs.append(aggregated_df)
-    
-    df_quarterly_prod_service_summary = pd.concat(quarterly_prod_service_summary_dfs, ignore_index=True) if quarterly_prod_service_summary_dfs else pd.DataFrame()
-    if not df_quarterly_prod_service_summary.empty:
-        df_quarterly_prod_service_summary['region'] = df_quarterly_prod_service_summary['quarter_temp'] # Region is the quarter name
-        df_quarterly_prod_service_summary['rpt_mth'] = df_quarterly_prod_service_summary['quarter_temp'] # rpt_mth is the quarter name
-        df_quarterly_prod_service_summary['data_type'] = "Quarterly_Prod_Service_Summary"
-        df_quarterly_prod_service_summary['load_ts'] = datetime.datetime.now().isoformat()
-        df_quarterly_prod_service_summary['summary'] = df_quarterly_prod_service_summary.apply(
-            lambda row: f"""{row['product_name']} {row['service_type']} in {row['region']} of {row['rpt_year']} has a total metric of {row['metric_name']} with a value of {row['metric_value']:.2f}, where {row['high_or_low_better']} (Quarterly Product & Service Summary)""",
-            axis=1
-        )
-        df_quarterly_prod_service_summary.drop(columns=['quarter_temp'], inplace=True)
+    # Define aggregation levels for iteration
+    product_levels = list(config.products.keys()) + ["All Products"]
+    region_levels = config.regions + ["All Regions"]
+    time_levels = ["monthly", "quarterly", "yearly"]
 
+    # Generate all combinations of summaries
+    for current_product_level in product_levels:
+        # Determine the set of service types to iterate for the current product level
+        if current_product_level == "All Products":
+            # When product is "All Products", we can summarize by "All Services" OR by individual service types (across all products)
+            service_types_to_iterate_for_this_product_level = all_unique_service_types + ["All Services"]
+        else:
+            # When product is individual, we summarize by its specific services or "All Services" for that product
+            service_types_to_iterate_for_this_product_level = config.products.get(current_product_level, []) + ["All Services"]
+            service_types_to_iterate_for_this_product_level = sorted(list(set(service_types_to_iterate_for_this_product_level))) # Remove duplicates
 
-    # --- Generate Yearly Product & Service Type Summaries (with region as "Full Year") ---
-    print(f"\n--- Generating Yearly Product & Service Type Summaries for {args.year} (Region=Full Year) ---")
+        for current_service_level in service_types_to_iterate_for_this_product_level:
+            for current_region_level in region_levels:
+                for current_time_level in time_levels:
 
-    yearly_prod_service_summary_group_cols = [
-        "product_name",
-        "service_type",
-        "rpt_year",
-        "metric_name",
-        "high_or_low_better"
-    ]
+                    grouping_dims = [] # Dimensions to group by for generate_summaries
+                    static_labels_for_summary = {} # Labels to apply after aggregation
+                    data_type_suffix_parts = []
+                    df_base_for_time = full_df_monthly # Base DF for time level, will be updated
 
-    # Dynamically apply 'sum' or 'mean' based on metric_name's rollup
-    yearly_prod_service_summary_dfs = []
-    if not full_df_monthly.empty:
-        for metric_name in full_df_monthly['metric_name'].unique():
-            rollup_func = get_rollup_function(metric_name, config.metrics_info)
-            df_filtered = full_df_monthly[full_df_monthly['metric_name'] == metric_name]
-            if not df_filtered.empty:
-                aggregated_df = df_filtered.groupby(yearly_prod_service_summary_group_cols, as_index=False).agg(
-                    metric_value=('metric_value', rollup_func)
-                )
-                yearly_prod_service_summary_dfs.append(aggregated_df)
-    
-    df_yearly_prod_service_summary = pd.concat(yearly_prod_service_summary_dfs, ignore_index=True) if yearly_prod_service_summary_dfs else pd.DataFrame()
-    if not df_yearly_prod_service_summary.empty:
-        df_yearly_prod_service_summary['region'] = "Full Year" # Region is "Full Year"
-        df_yearly_prod_service_summary['rpt_mth'] = "Full Year" # rpt_mth is "Full Year" for yearly summaries
-        df_yearly_prod_service_summary['data_type'] = "Yearly_Prod_Service_Summary"
-        df_yearly_prod_service_summary['load_ts'] = datetime.datetime.now().isoformat()
-        df_yearly_prod_service_summary['summary'] = df_yearly_prod_service_summary.apply(
-            lambda row: f"""{row['product_name']} {row['service_type']} for {row['region']} of {row['rpt_year']} has a total metric of {row['metric_name']} with a value of {row['metric_value']:.2f}, where {row['high_or_low_better']} (Yearly Product & Service Summary)""",
-            axis=1
-        )
+                    # --- Determine Time Dimension and base DataFrame ---
+                    if current_time_level == 'monthly':
+                        grouping_dims.extend(["rpt_mth", "rpt_year"])
+                        data_type_suffix_parts.insert(0, "Monthly")
+                        df_base_for_time = full_df_monthly
+                        static_labels_for_summary['quarter_temp'] = None # quarter_temp is not relevant for monthly
+                    elif current_time_level == 'quarterly':
+                        grouping_dims.extend(["rpt_mth", "rpt_year"])
+                        data_type_suffix_parts.insert(0, "Quarterly")
+                        
+                        # Create a new DataFrame for quarterly aggregation
+                        df_base_for_time = temp_df_for_quarterly_agg.copy()
+                        # Overwrite rpt_mth with quarter_temp values
+                        df_base_for_time['rpt_mth'] = df_base_for_time['quarter_temp']
+                        # Drop the original 'quarter_temp' column as its values are now in 'rpt_mth'
+                        df_base_for_time = df_base_for_time.drop(columns=['quarter_temp'])
+                        
+                        # Remove quarter_temp from static_labels_for_summary if it was added in a previous iteration
+                        if 'quarter_temp' in static_labels_for_summary:
+                            del static_labels_for_summary['quarter_temp']
+                        # Ensure rpt_mth is not set to None or "Full Year" if it was from a previous iteration
+                        if 'rpt_mth' in static_labels_for_summary and static_labels_for_summary['rpt_mth'] in [None, "Full Year"]:
+                            del static_labels_for_summary['rpt_mth']
 
-    # --- Generate Monthly Product-Only Summaries (with service_type/region as month name) ---
-    print(f"\n--- Generating Monthly Product-Only Summaries for {args.year} (Service/Region=Month level) ---")
-    monthly_product_summary_group_cols = [
-        "product_name",
-        "rpt_mth", # This will become the 'service_type' and 'region' for the summary
-        "rpt_year",
-        "metric_name",
-        "high_or_low_better"
-    ]
+                    elif current_time_level == 'yearly':
+                        grouping_dims.append("rpt_year")
+                        static_labels_for_summary['rpt_mth'] = "Full Year"
+                        static_labels_for_summary['quarter_temp'] = None
+                        data_type_suffix_parts.insert(0, "Yearly")
+                        df_base_for_time = full_df_monthly # For yearly, can use either as only year is relevant
 
-    # Dynamically apply 'sum' or 'mean' based on metric_name's rollup
-    monthly_product_summary_dfs = []
-    if not full_df_monthly.empty:
-        for metric_name in full_df_monthly['metric_name'].unique():
-            rollup_func = get_rollup_function(metric_name, config.metrics_info)
-            df_filtered = full_df_monthly[full_df_monthly['metric_name'] == metric_name]
-            if not df_filtered.empty:
-                aggregated_df = df_filtered.groupby(monthly_product_summary_group_cols, as_index=False).agg(
-                    metric_value=('metric_value', rollup_func)
-                )
-                monthly_product_summary_dfs.append(aggregated_df)
-    
-    df_monthly_product_summary = pd.concat(monthly_product_summary_dfs, ignore_index=True) if monthly_product_summary_dfs else pd.DataFrame()
-    if not df_monthly_product_summary.empty:
-        df_monthly_product_summary['service_type'] = df_monthly_product_summary['rpt_mth']
-        df_monthly_product_summary['region'] = df_monthly_product_summary['rpt_mth']
-        df_monthly_product_summary['data_type'] = "Monthly_Product_Summary"
-        df_monthly_product_summary['load_ts'] = datetime.datetime.now().isoformat()
-        df_monthly_product_summary['summary'] = df_monthly_product_summary.apply(
-            lambda row: f"""Product '{row['product_name']}' in {row['region']} of {row['rpt_year']} has a total metric of {row['metric_name']} with a value of {row['metric_value']:.2f}, where {row['high_or_low_better']} (Monthly Product-Only Summary)""",
-            axis=1
-        )
-    
-    # --- Generate Quarterly Product-Only Summaries (with service_type/region as quarter name) ---
-    print(f"\n--- Generating Quarterly Product-Only Summaries for {args.year} (Service/Region=Quarter level) ---")
-    
-    # Create a temporary df for quarterly aggregation to add 'quarter_temp'
-    temp_df_for_quarterly_product_agg = full_df_monthly.copy()
-    if not temp_df_for_quarterly_product_agg.empty:
-        temp_df_for_quarterly_product_agg['quarter_temp'] = temp_df_for_quarterly_product_agg['rpt_mth'].apply(
-            lambda x: get_quarter_name(datetime.datetime.strptime(x, '%B').month)
-        )
+                    # --- Filter the DataFrame based on specific individual levels ---
+                    # This pre-filtering is crucial for 'individual' levels to reduce the data before aggregation
+                    df_to_aggregate = df_base_for_time.copy()
 
-    quarterly_product_summary_group_cols = [
-        "product_name",
-        "quarter_temp",
-        "rpt_year", # Added rpt_year to grouping columns
-        "metric_name",
-        "high_or_low_better"
-    ]
+                    # Product Dimension Filtering/Labeling
+                    if current_product_level != "All Products":
+                        df_to_aggregate = df_to_aggregate[df_to_aggregate['product_name'] == current_product_level]
+                        static_labels_for_summary['product_name'] = current_product_level
+                        data_type_suffix_parts.append(current_product_level.replace(" ", "_"))
+                    else:
+                        static_labels_for_summary['product_name'] = "All Products"
+                        data_type_suffix_parts.append("All_Prod")
 
-    # Dynamically apply 'sum' or 'mean' based on metric_name's rollup
-    quarterly_product_summary_dfs = []
-    if not full_df_monthly.empty:
-        for metric_name in temp_df_for_quarterly_product_agg['metric_name'].unique():
-            rollup_func = get_rollup_function(metric_name, config.metrics_info)
-            df_filtered = temp_df_for_quarterly_product_agg[temp_df_for_quarterly_product_agg['metric_name'] == metric_name]
-            if not df_filtered.empty:
-                aggregated_df = df_filtered.groupby(quarterly_product_summary_group_cols, as_index=False).agg(
-                    metric_value=('metric_value', rollup_func)
-                )
-                quarterly_product_summary_dfs.append(aggregated_df)
-    
-    df_quarterly_product_summary = pd.concat(quarterly_product_summary_dfs, ignore_index=True) if quarterly_product_summary_dfs else pd.DataFrame()
-    if not df_quarterly_product_summary.empty:
-        df_quarterly_product_summary['service_type'] = df_quarterly_product_summary['quarter_temp']
-        df_quarterly_product_summary['region'] = df_quarterly_product_summary['quarter_temp']
-        df_quarterly_product_summary['rpt_mth'] = df_quarterly_product_summary['quarter_temp']
-        df_quarterly_product_summary['data_type'] = "Quarterly_Product_Summary"
-        df_quarterly_product_summary['load_ts'] = datetime.datetime.now().isoformat()
-        df_quarterly_product_summary['summary'] = df_quarterly_product_summary.apply(
-            lambda row: f"""Product '{row['product_name']}' in {row['region']} of {row['rpt_year']} has a total metric of {row['metric_name']} with a value of {row['metric_value']:.2f}, where {row['high_or_low_better']} (Quarterly Product-Only Summary)""",
-            axis=1
-        )
-        df_quarterly_product_summary.drop(columns=['quarter_temp'], inplace=True)
+                    # Service Dimension Filtering/Labeling
+                    if current_service_level != "All Services":
+                        df_to_aggregate = df_to_aggregate[df_to_aggregate['service_type'] == current_service_level]
+                        static_labels_for_summary['service_type'] = current_service_level
+                        data_type_suffix_parts.append(current_service_level.replace(" ", "_"))
+                    else: # current_service_level is "All Services"
+                        static_labels_for_summary['service_type'] = "All Services"
+                        data_type_suffix_parts.append("All_Service")
+
+                    # Region Dimension Filtering/Labeling
+                    if current_region_level != "All Regions":
+                        df_to_aggregate = df_to_aggregate[df_to_aggregate['region'] == current_region_level]
+                        static_labels_for_summary['region'] = current_region_level
+                        data_type_suffix_parts.append(current_region_level.replace(" ", "_"))
+                    else:
+                        static_labels_for_summary['region'] = "All Regions"
+                        data_type_suffix_parts.append("All_Region")
+
+                    data_type_suffix = "_".join(data_type_suffix_parts) + "_Summary"
+
+                    print(f"\n--- Generating {data_type_suffix.replace('_', ' ')} ---")
+
+                    summary_df = generate_summaries(
+                        df_to_aggregate, # Pass the pre-filtered DataFrame
+                        dimensions_to_group_by=grouping_dims, # Only time dimensions for grouping within generate_summaries
+                        static_labels=static_labels_for_summary,
+                        data_type_suffix=data_type_suffix
+                    )
+                    all_generated_dfs.append(summary_df)
 
 
-    # --- Generate Yearly Product-Only Summaries (with service_type/region as "Full Year") ---
-    print(f"\n--- Generating Yearly Product-Only Summaries for {args.year} (Service/Region=Full Year) ---")
-
-    yearly_product_summary_group_cols = [
-        "product_name",
-        "rpt_year",
-        "metric_name",
-        "high_or_low_better"
-    ]
-
-    # Dynamically apply 'sum' or 'mean' based on metric_name's rollup
-    yearly_product_summary_dfs = []
-    if not full_df_monthly.empty:
-        for metric_name in full_df_monthly['metric_name'].unique():
-            rollup_func = get_rollup_function(metric_name, config.metrics_info)
-            df_filtered = full_df_monthly[full_df_monthly['metric_name'] == metric_name]
-            if not df_filtered.empty:
-                aggregated_df = df_filtered.groupby(yearly_product_summary_group_cols, as_index=False).agg(
-                    metric_value=('metric_value', rollup_func)
-                )
-                yearly_product_summary_dfs.append(aggregated_df)
-    
-    df_yearly_product_summary = pd.concat(yearly_product_summary_dfs, ignore_index=True) if yearly_product_summary_dfs else pd.DataFrame()
-    if not df_yearly_product_summary.empty:
-        df_yearly_product_summary['service_type'] = "Full Year"
-        df_yearly_product_summary['region'] = "Full Year"
-        df_yearly_product_summary['rpt_mth'] = "Full Year"
-        df_yearly_product_summary['data_type'] = "Yearly_Product_Summary"
-        df_yearly_product_summary['load_ts'] = datetime.datetime.now().isoformat()
-        df_yearly_product_summary['summary'] = df_yearly_product_summary.apply(
-            lambda row: f"""Product '{row['product_name']}' for {row['region']} of {row['rpt_year']} has a total metric of {row['metric_name']} with a value of {row['metric_value']:.2f}, where {row['high_or_low_better']} (Yearly Product-Only Summary)""",
-            axis=1
-        )
-
-    # Combine all generated dataframes
-    all_generated_dfs = [
-        full_df_monthly,
-        df_monthly_prod_service_summary,
-        df_quarterly_prod_service_summary,
-        df_yearly_prod_service_summary,
-        df_monthly_product_summary,
-        df_quarterly_product_summary,
-        df_yearly_product_summary
-    ]
-    
     # Filter out empty dataframes before concatenation
     all_generated_dfs = [df for df in all_generated_dfs if not df.empty]
 
     if all_generated_dfs:
         final_df = pd.concat(all_generated_dfs, ignore_index=True)
     else:
-        final_df = pd.DataFrame() # Create an empty DataFrame if no data was generated
+        final_df = pd.DataFrame(columns=config.unique_columns + ['metric_value', 'summary', 'load_ts', 'data_type', 'high_or_low_better']) # Ensure columns exist even if empty
 
     # Ensure final_df has unique_columns for final deduplication
     if not final_df.empty:
+        # Add missing unique_columns if they somehow got dropped or were not created for some summary
+        for col in config.unique_columns:
+            if col not in final_df.columns:
+                final_df[col] = None 
+        
+        # Drop quarter_temp if it exists, as it's a temporary column for quarterly aggregation
+        if 'quarter_temp' in final_df.columns:
+            final_df.drop(columns=['quarter_temp'], inplace=True)
+
+        # Drop duplicates based on the defined unique columns
+        initial_final_rows = len(final_df)
         final_df.drop_duplicates(subset=config.unique_columns, inplace=True)
-        print(f"\nFinal combined and deduplicated DataFrame has {len(final_df)} rows.")
+        rows_after_final_dedup = len(final_df)
+        print(f"\nRemoved {initial_final_rows - rows_after_final_dedup} duplicate rows from combined final data. Remaining rows: {rows_after_final_dedup}")
+
+        # Reorder columns to a consistent order for output
+        desired_columns_order = [
+            "product_name", "service_type", "region", "rpt_mth", "rpt_year", 
+            "metric_name", "metric_value", "high_or_low_better", "data_type", "load_ts", "summary"
+        ]
+        # Add any columns that might be in final_df but not in desired_columns_order at the end
+        extra_cols = [col for col in final_df.columns if col not in desired_columns_order]
+        final_df = final_df[desired_columns_order + extra_cols]
+
 
         # Save the final DataFrame to a CSV file in the 'data' folder
         os.makedirs("data", exist_ok=True)
@@ -705,7 +670,6 @@ if __name__ == "__main__":
 
             for name, group in grouped_interactions:
                 rpt_mth, rpt_year, region, service_type = name
-
                 parent_val_df = group[group['metric_name'] == customer_interactions_parent]['metric_value'].sum()
                 
                 sum_of_components = 0
@@ -726,6 +690,5 @@ if __name__ == "__main__":
                 print("\nNumber of Customer Interactions business rule is satisfied at the monthly level.")
         else:
             print("No Wireless Customer Interactions monthly data to verify business rules.")
-
     else:
         print("No monthly data generated to verify rollups and business rules.")

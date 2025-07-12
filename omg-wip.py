@@ -19,24 +19,84 @@ from ragas import evaluate
 from ragas.metrics import faithfulness, answer_relevancy, context_recall, context_precision
 from datasets import Dataset
 
-# --- Configuration Import ---
+# --- Configuration Import and Validation ---
+# Initialize config variables with None as defaults. This ensures they always exist
+# in the global scope, even if they are missing from config.py.
+NEO4J_URI = None
+NEO4J_USERNAME = None
+NEO4J_PASSWORD = None
+GEMINI_API_TOKEN = None
+RAG_LLM_MODEL = None
+RAGAS_LLM_MODEL = None # Ensure this is explicitly initialized
+
 try:
-    from config import *
+    # Attempt to import specific variables from config.py
+    # This will overwrite the None defaults if the variables exist in config.py
+    from config import (
+        NEO4J_URI,
+        NEO4J_USERNAME,
+        NEO4J_PASSWORD,
+        GEMINI_API_TOKEN,
+        RAG_LLM_MODEL,
+        RAGAS_LLM_MODEL
+    )
+    # After importing, check if any critical variables are still None or empty
+    missing_vars = []
+    if not NEO4J_URI: missing_vars.append("NEO4J_URI")
+    if not NEO4J_USERNAME: missing_vars.append("NEO4J_USERNAME")
+    if not NEO4J_PASSWORD: missing_vars.append("NEO4J_PASSWORD")
+    if not GEMINI_API_TOKEN: missing_vars.append("GEMINI_API_TOKEN")
+    if not RAG_LLM_MODEL: missing_vars.append("RAG_LLM_MODEL")
+    if not RAGAS_LLM_MODEL: missing_vars.append("RAGAS_LLM_MODEL")
+
+    if missing_vars:
+        st.error(f"Configuration error: The following variables are missing or empty in 'config.py': {', '.join(missing_vars)}. Please define them correctly.")
+        # Set a flag to indicate critical config is missing
+        config_ok = False
+    else:
+        config_ok = True
+
 except ImportError:
-    st.error("Please ensure 'config.py' exists and contains NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, GEMINI_API_TOKEN, RAG_LLM_MODEL, RAGAS_LLM_MODEL.")
-    st.stop()
+    st.error("Error: 'config.py' not found. Please ensure it exists in the same directory as 'omg.py'.")
+    config_ok = False
+except Exception as e:
+    st.error(f"An error occurred during config import: {e}. Please check config.py syntax.")
+    traceback.print_exc()
+    config_ok = False
+
 
 # --- Config Setup ---
-genai.configure(api_key=GEMINI_API_TOKEN)
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
-# Initialize the Gemini model for direct calls (for entity extraction, narrative generation, validation, GROUND TRUTH)
-client = genai.GenerativeModel(RAG_LLM_MODEL)
+# Only proceed with API setup if all critical configuration variables were successfully loaded and are not empty
+if config_ok:
+    genai.configure(api_key=GEMINI_API_TOKEN)
+    try:
+        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
+        # Test connection by running a simple query
+        with driver.session() as session:
+            session.run("RETURN 1").single()
+    except Exception as e:
+        st.error(f"Failed to connect to Neo4j database with provided credentials: {e}. Please check NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in config.py.")
+        driver = None # Set driver to None if connection fails
+        config_ok = False # Mark config as not OK if DB connection fails
 
-# Initialize the LangChain LLM for the agent
-agent_llm = ChatGoogleGenerativeAI(model=RAG_LLM_MODEL, google_api_key=GEMINI_API_TOKEN, temperature=0.0)
+    # Initialize LLM clients only if API token and model names are available
+    if GEMINI_API_TOKEN and RAG_LLM_MODEL:
+        client = genai.GenerativeModel(RAG_LLM_MODEL)
+        agent_llm = ChatGoogleGenerativeAI(model=RAG_LLM_MODEL, google_api_key=GEMINI_API_TOKEN, temperature=0.0)
+        # Set GOOGLE_API_KEY environment variable for Ragas and other tools that might implicitly use it
+        os.environ["GOOGLE_API_KEY"] = GEMINI_API_TOKEN
+    else:
+        st.error("Gemini API token or RAG_LLM_MODEL is missing. LLM functionalities will be disabled.")
+        client = None
+        agent_llm = None
+        config_ok = False # Mark config as not OK
 
-# Initialize LLMs for Ragas evaluation
-os.environ["GOOGLE_API_KEY"] = GEMINI_API_TOKEN
+else:
+    st.warning("Critical configuration variables are missing or invalid. Most functionalities will be disabled.")
+    driver = None
+    client = None
+    agent_llm = None
+
 
 # --- Streamlit Chatbot UI ---
 st.title("Om Ganesha")
@@ -59,7 +119,7 @@ if "show_cypher_for_msg" not in st.session_state:
 # Display the greeting only if it hasn't been shown yet in the current session
 if not st.session_state.greeting_shown:
     with st.chat_message("assistant"):
-        st.write("Hello there! I'm your AI assistant.I can provide reasoning on various Business Metrics in Consumer Wireline,Wireless and FWA areas. How can I help you today?")
+        st.write("Hello there! I'm your AI assistant.I can provide reasoning on various Business Metrics in Consumer Wireline,Wireless and FWA areas. How can I help you today?. Start conversation by typing **Hi** or **Help** to know what data i can support.")
     st.session_state.greeting_shown = True # Mark as shown
 
 # --- Ragas Evaluation Function ---
@@ -68,7 +128,7 @@ def run_ragas_evaluation():
         st.warning("No data available to run Ragas evaluation. Ask a question first!")
         return
 
-    st.subheader("Ragas Evaluation Results")
+    st.write("**Ragas Evaluation Results**")
 
     questions = [item["question"] for item in st.session_state.evaluation_data]
     answers = [item["answer"] for item in st.session_state.evaluation_data]
@@ -96,6 +156,11 @@ def run_ragas_evaluation():
 
         st.write("Running Ragas evaluation... This might take a moment.")
         with st.spinner("Calculating Ragas metrics..."):
+            # Check if RAGAS_LLM_MODEL and GEMINI_API_TOKEN are available and valid
+            if not RAGAS_LLM_MODEL or not GEMINI_API_TOKEN: # <--- Updated check
+                st.error("Ragas LLM model name or Gemini API token is missing or invalid. Please check your config.py.")
+                return
+
             ragas_llm = ChatGoogleGenerativeAI(model=RAGAS_LLM_MODEL, google_api_key=GEMINI_API_TOKEN, temperature=0.0)
             ragas_embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GEMINI_API_TOKEN)
 
@@ -124,7 +189,7 @@ for idx, msg in enumerate(st.session_state.chat_history):
         with st.chat_message("assistant"): # This aligns to the right
             st.markdown(f"<span style='color:#ff2500;'>{msg['content']}</span>", unsafe_allow_html=True) # Green color
             # If the assistant message has a cypher query, display the expander
-            if "cypher_query" in msg and msg["cypher_query"]:
+            if "cypher_query" in msg and msg["cypher_query"]: # This condition ensures expander only shows if there's a query
                 with st.expander("More Info"):
                     # Button to show Cypher Query
                     if st.button("Show Generated Cypher Query", key=f"show_cypher_button_{idx}"):
@@ -132,29 +197,30 @@ for idx, msg in enumerate(st.session_state.chat_history):
                         for k in list(st.session_state.show_cypher_for_msg.keys()):
                             if k != idx:
                                 st.session_state.show_cypher_for_msg[k] = False
-                        st.rerun()
+                        # Removed st.rerun() here as it can cause issues during processing of new queries
 
                     # Display Cypher Query if the button for this message was pressed
                     if st.session_state.show_cypher_for_msg.get(idx, False):
-                        st.write("Generated Cypher Query:")
+                        st.write("**Generated Cypher Query:**")
                         st.code(msg["cypher_query"], language="cypher")
 
                     # Button to show metrics for this specific message
-                    if st.button("Show Query Traversal Metrics", key=f"show_metrics_button_{idx}"):
+                    if st.button("Show Cypher Query Metrics", key=f"show_metrics_button_{idx}"):
                         # Toggle the state for this message
                         st.session_state.show_metrics_for_msg[idx] = not st.session_state.show_metrics_for_msg.get(idx, False)
                         # Ensure only one metrics view is open at a time if desired, otherwise remove this loop
                         for k in list(st.session_state.show_metrics_for_msg.keys()):
                             if k != idx:
-                                st.session_session.show_metrics_for_msg[k] = False
-                        st.rerun() # Rerun to update the display
+                                # Fix typo: st.session_session -> st.session_state
+                                st.session_state.show_metrics_for_msg[k] = False
+                        # Removed st.rerun() here as it can cause issues during processing of new queries
 
                     # Display metrics if the button for this message was pressed
                     if st.session_state.show_metrics_for_msg.get(idx, False):
                         if "cypher_metrics" in msg and msg["cypher_metrics"]:
-                            st.write("Query Traversal Metrics:")
+                            st.write("**Cypher Query Traversal / Metadata Metrics:**")
                             for metric_name, metric_value in msg["cypher_metrics"].items():
-                                st.write(f"{metric_name.replace('_', ' ')}: {metric_value}")
+                                st.write(f"{metric_name.replace('_', ' ').title()}: {metric_value}")
                         else:
                             st.info("No query traversal metrics available for this query.")
 
@@ -168,21 +234,27 @@ user_query = st.chat_input("Ask a question about telecom KPIs:")
 
 # --- Function: Extract entities & relationship ---
 def get_relevant_metrics_and_relationships(query: str, metric_list) -> dict:
+    if not client:
+        st.error("LLM client not initialized. Cannot extract entities.")
+        return {}
     prompt = f"""
     Given the user question: "{query}", extract:
     1. Metrics mentioned or implied. available metrics are {', '.join(metric_list)}.
     2. Type of relationship (e.g., positive, negative, influenced)
-    3. product type for example wireless,wireline etc. if no product type mentioned then include both wireline and wireless.
-    4. service for example for wireline voice, video , data and for wireless product type prepaid or postpaid , if we can not determine service type then leave it just empty,do not keep empty string list.
-    5. US region or major market area if mentioned, e.g., southeast , west , new york,California, Texas, etc. if we can not determine region then leave it empty
+    3. product type for example wireless,wireline etc. if no product type mentioned then take "All Products".
+    4. service for example for wireline voice, video , data and for wireless product type prepaid or postpaid.. do not keep empty string list.
+    5. US region or major market area if mentioned, e.g., southeast , west , new york,California, Texas, etc. if we can not determine region then use "All Regions".
     6. Time period eg given month , last month,quarter , q1,q2,q3,q4,full year, last year, etc.
         1st Quarter means q1, 2nd Quarter means qq2, 3rd Quarter means q3, 4th Quarter means q4.
         if two quaters are mentioned then use q1,q2 or q3,q4 etc.
         Do not include year in the time period column.
     7. year if mentioned, if not mentioned then keep it empty.
     8. if the user query is asking for general performance or scorecard and did not mention any metric name then consider only these metrics 'wireline gross adds', 'wireless gross adds', 'wireline net adds', 'wireless net adds', 'wireline disconnects', 'wireless disconnects', 'wireline churn rate', 'wireless churn rate'.
+    9. what to return or group by. For example, if the user asks for 'top 3 regions', then return 'region', to performing months then return rpt_mth, top performing services then return service_type, top performing products means return product_type. If the user asks for 'best performing product types', then return 'product_type'. If not specified, leave empty.
+    10. number of items if user asks for top N or bottom N. For example if the user asks for 'top 3 regions', then return '3', . If not specified, leave empty.
+    11. order if user asks for top or bottom. For example if the user asks for 'top 3 regions', then return 'DESC'. If the user asks for 'bottom 3 regions', then return 'ASC'. If not specified, leave empty.
 
-    Respond strictly in JSON format with keys: 'metrics', 'relationship_type','product_type','service_type','regions', 'time_period','year'.
+    Respond strictly in JSON format with keys: 'metrics', 'relationship_type','product_type','service_type','regions', 'time_period','year', 'group_by', 'limit', 'order'.
     Example:
     {{
       "metrics": ["customer churn", "ARPU"],
@@ -191,7 +263,10 @@ def get_relevant_metrics_and_relationships(query: str, metric_list) -> dict:
       "service_type": ["voice","data"],
       "regions": ["southeast"],
       "time_period": ["january"],
-      "year": [2024]
+      "year": [2024],
+      "group_by": ["region"],
+      "limit": 3,
+      "order": "DESC"
     }}
     """
 
@@ -255,6 +330,7 @@ def generate_cypher(parsed: dict) -> str:
 
         if period==[''] or not period:
             period = ["full year"]
+
         if service_name==[''] and period==['full year']: # If no service type and full year, assume full year for service type data
             service_name = ["full year"]
         if regions==[''] and period==['full year']: # If no region and full year, assume full year for region data
@@ -286,6 +362,7 @@ def generate_cypher(parsed: dict) -> str:
             conditions.append(f"toLower(md1.region) in {json.dumps(period)} AND toLower(md2.region) in {json.dumps(period)}")
 
 
+
         conditions.append(f"""
             toLower(md1.service_type) = toLower(md2.service_type)
             and toLower(md1.product_name) = toLower(md2.product_name)
@@ -293,7 +370,7 @@ def generate_cypher(parsed: dict) -> str:
 
         # Base query for metrics and their relationships
         query = f"""
-        MATCH (m1:Metric)-[r]->(m2:Metric)
+        MATCH (m1:Metric)-[r*1]->(m2:Metric)
         WHERE toLower(m1.name) IN {json.dumps(metrics)} OR toLower(m2.name) IN {json.dumps(metrics)}
         WITH m1, m2, r
         MATCH (m1)-[has_data_m1_md1:HAS_DATA]->(md1:MetricData)
@@ -307,10 +384,10 @@ def generate_cypher(parsed: dict) -> str:
                 query += f"WHERE " + " AND ".join(clean_conditions) + "\n"
 
         query += f"""
-        RETURN DISTINCT m1.name AS Metric_A, md1.metric_value AS Metric_A_Value, md1.rpt_mth AS ReportMonth, md1.rpt_year AS ReportYear,
-                        m2.name AS Metric_B, md2.metric_value AS Metric_B_Value,
+        RETURN DISTINCT m1.name AS Metric_A, toFloat(md1.metric_value) AS Metric_A_Value, md1.rpt_mth AS ReportMonth, md1.rpt_year AS ReportYear,
+                        m2.name AS Metric_B, toFloat(md2.metric_value) AS Metric_B_Value,
                         md1.service_type , md1.product_name ,md1.region ,
-                        type(r) //,m1,m2,md1,md2,has_data_m1_md1,has_data_m2_md2
+                        [rel IN r | rel.reasoning] as reasoning//,r,m1,m2,md1,md2,has_data_m1_md1,has_data_m2_md2
         """
         return query
     except Exception as e:
@@ -322,8 +399,8 @@ def generate_cypher(parsed: dict) -> str:
 # --- Function: Generate Cypher Query for Simple Questions (NEW) ---
 def generate_simple_cypher(parsed: dict) -> str:
     """
-    Generates a Cypher query to fetch a specific metric's value based on provided dimensions.
-    Assumes only one metric is requested for simplicity.
+    Generates a Cypher query to fetch a specific metric's value based on provided dimensions,
+    and also supports aggregation (e.g., top N regions).
     """
     metrics = [m.lower() for m in (parsed.get('metrics') or [])]
     period = [m.lower() for m in (parsed.get('time_period') or [])]
@@ -331,6 +408,9 @@ def generate_simple_cypher(parsed: dict) -> str:
     product_name = [m.lower() for m in (parsed.get('product_type') or [])]
     service_name = [m.lower() for m in (parsed.get('service_type') or [])]
     regions = [r.lower() for r in (parsed.get('regions') or [])]
+    group_by_dimension = parsed.get('group_by', [])
+    limit_results = parsed.get('limit')
+    order_by_direction = parsed.get('order') # "ASC" or "DESC"
 
     if not metrics:
         return "" # Cannot generate query without a metric
@@ -356,30 +436,82 @@ def generate_simple_cypher(parsed: dict) -> str:
     elif not year and "month" in period:
         year = [current_date.year]
 
-    if period:
-        conditions.append(f"toLower(md.rpt_mth) IN {json.dumps(period)}")
+    if period == [''] or not period:
+        period = ["full year"]
+
+    if period and period != ['']:
+        conditions.append(f"toLower(md.rpt_mth) in {json.dumps(period)}")
     if year:
-        conditions.append(f"md.rpt_year IN {json.dumps(year)}")
-    if product_name:
-        conditions.append(f"toLower(md.product_name) IN {json.dumps(product_name)}")
-    if service_name:
-        conditions.append(f"toLower(md.service_type) IN {json.dumps(service_name)}")
-    if regions:
-        conditions.append(f"toLower(md.region) IN {json.dumps(regions)}")
+        conditions.append(f"md.rpt_year in {json.dumps(year)}")
+    if product_name and product_name != ['']:
+        conditions.append(f"toLower(md.product_name) in {json.dumps(product_name)}")
 
-    query = f"""
-    MATCH (m:Metric)-[:HAS_DATA]->(md:MetricData)
-    WHERE toLower(m.name) = '{metric_name.lower()}'
-    """
+    if service_name and service_name != ['']:
+        conditions.append(f"toLower(md.service_type) in {json.dumps(service_name)}")
+
+    # Only add region filter if specific regions are provided and we are NOT grouping by region
+    if regions ==["all regions"] and group_by_dimension == ["region"]:
+        conditions.append(f' NOT toLower(md.region) IN ["all regions"]') # This is to handle the case where user wants all regions
+    elif regions and regions != [] and group_by_dimension != ["region"]:
+        conditions.append(f"toLower(md.region) in {json.dumps(regions)}")
+
+    query_parts = [
+        "MATCH (m:Metric)-[:HAS_DATA]->(md:MetricData)",
+        f"WHERE toLower(m.name) = '{metric_name.lower()}'"
+    ]
+
     if conditions:
-        query += "AND " + " AND ".join(conditions) + "\n"
+        query_parts.append("AND " + " AND ".join(conditions))
+    print("group by ",group_by_dimension)
+    # Handle grouping, ordering, and limiting for "top N" or "bottom N" queries
+    if group_by_dimension:
+        dimension_to_group_by = group_by_dimension[0] if group_by_dimension else None
 
-    query += f"""
-    RETURN m.name AS MetricName, md.metric_value AS MetricValue, md.rpt_mth AS ReportMonth,
-           md.rpt_year AS ReportYear, md.product_name AS ProductType,
-           md.service_type AS ServiceType, md.region AS Region
-    """
-    return query
+        if dimension_to_group_by:
+            # The alias for the grouping dimension in WITH and RETURN clauses
+            grouping_alias = f"md.{dimension_to_group_by}"
+            
+            query_parts.append(f"WITH m, md, {grouping_alias} AS GroupingKey")
+            
+            # The SUM alias for ordering, converting metric_value to float
+            sum_alias = f"{metric_name.replace(' ', '_').title()}TotalValue"
+            
+            return_items = [
+                f"GroupingKey AS GroupingDimension",
+                f"SUM(toFloat(md.metric_value)) AS {sum_alias}" # Convert to float for SUM
+            ]
+            
+            # Add other return dimensions only if they are not the grouping dimension
+            # and if they make sense to COLLECT.
+            if dimension_to_group_by != 'product_name':
+                return_items.append("COLLECT(DISTINCT md.product_name) AS ProductTypes")
+            if dimension_to_group_by != 'service_type':
+                return_items.append("COLLECT(DISTINCT md.service_type) AS ServiceTypes")
+            if dimension_to_group_by != 'region':
+                return_items.append("COLLECT(DISTINCT md.region) AS Regions")
+            if dimension_to_group_by != 'rpt_mth':
+                return_items.append("COLLECT(DISTINCT md.rpt_mth) AS ReportMonths")
+            if dimension_to_group_by != 'rpt_year':
+                return_items.append("COLLECT(DISTINCT md.rpt_year) AS ReportYears")
+            
+            query_parts.append(f"RETURN {', '.join(return_items)}")
+            query_parts.append(f"ORDER BY {sum_alias} {order_by_direction if order_by_direction else 'DESC'}")
+            if limit_results:
+                query_parts.append(f"LIMIT {limit_results}")
+        else: # Should not happen if group_by_dimension is not empty, but for safety
+            query_parts.append(f"""
+            RETURN m.name AS MetricName, toFloat(md.metric_value) AS MetricValue, md.rpt_mth AS ReportMonth,
+                   md.rpt_year AS ReportYear, md.product_name AS ProductType,
+                   md.service_type AS ServiceType, md.region AS Region
+            """)
+    else: # Standard simple query without aggregation
+        query_parts.append(f"""
+        RETURN m.name AS MetricName, toFloat(md.metric_value) AS MetricValue, md.rpt_mth AS ReportMonth,
+               md.rpt_year AS ReportYear, md.product_name AS ProductType,
+               md.service_type AS ServiceType, md.region AS Region
+        """)
+        
+    return "\n".join(query_parts)
 
 
 # --- Function: Run Neo4j Query ---
@@ -389,6 +521,9 @@ def query_neo4j(cypher_query: str):
     db hits, rows, and time taken (where available).
     Returns: (data, metrics_dict)
     """
+    if not driver:
+        st.error("Neo4j driver not initialized. Cannot query database.")
+        return [], {}
     try:
         with driver.session() as session:
             # --- Execute the Actual Query First ---
@@ -457,6 +592,8 @@ def query_neo4j(cypher_query: str):
         return [], {}
 # --- Function: Build Story from Results ---
 def build_narrative(data: list, user_question: str) -> str:
+    if not client:
+        return "LLM client not initialized. Cannot build narrative."
     try:
         prompt = f"""
         Using the following data and original question, write an insight story.
@@ -493,6 +630,8 @@ def build_simple_answer(data: list, user_question: str) -> str:
     """
     Generates a concise answer for simple metric lookup questions using LLM.
     """
+    if not client:
+        return "LLM client not initialized. Cannot build simple answer."
     if not data:
         return "No data found for your specific query. Please check the metric, dimensions, and time period."
 
@@ -500,15 +639,24 @@ def build_simple_answer(data: list, user_question: str) -> str:
     compact_data = json.dumps(data, indent=2)
 
     prompt = f"""
-You are an assistant answering a simple metric lookup question for telecom KPIs.
+        Focus on causality, comparison, and trends. If the answer generated using multiple metrics then write up to 10 lines other wise Write 4-5 lines only.
+        If the user query is asking for general performance or scorecard and did not mention any metric name then consider only these metrics 'wireline gross adds', 'wireless gross adds', 'wireline net adds', 'wireless net adds', 'wireline disconnects', 'wireless disconnects', 'wireline churn rate', 'wireless churn rate'.
+        If the user query asks to write in bullet points then write in bullet points.
+        Do not sum up group(same metric with various dimensions) Metric values if direct metric avaialable with value.
+        Incase we need to sum some of the metrics then use proper justification to sum up the values accurately.
+        Include metric and metric value while calclualting the total value in the narrative.
+        Generate a narrative with avaialabel context only , no hallucinated values.
+        When no specific product type mentioned in user query , then concider all products for narration.
+        If service type mentioned then mention figures for each service type, otherwise mention figures for all services.
+        If the question cannot be answered from the provided 'Raw Data', state that clearly.
 
-User Question:
-{user_question}
+    User Question:
+    {user_question}
 
-Data:
-{compact_data}
-
-Write a concise, direct answer using the data above. Include the metric name, value, product type, service type, region, and time period in your answer. If there are multiple records, summarize them clearly. Do not hallucinate or infer values not present in the data.
+    Data:
+    {compact_data}
+    
+    Answer:
     """
 
     try:
@@ -530,6 +678,8 @@ def validate_answer_with_ai(user_question: str, generated_narrative: str, raw_da
     Validates the generated narrative using simplified, Gemini 2.5 compatible prompt.
     Uses a summarized version of raw_data to prevent response block or truncation.
     """
+    if not client:
+        return "LLM client not initialized. Cannot validate answer."
     try:
         # Summarize raw data (limit to first 3 records, or fewer for very large data)
         summary_data = raw_data # Consider raw_data[:5] or a more sophisticated summary if data is huge
@@ -585,6 +735,8 @@ def generate_ground_truth_from_data(user_question: str, raw_data: list) -> str:
     Generates a concise, factual ground truth answer based *only* on the provided raw data.
     This function leverages an LLM (similar to your validation function) but with a different prompt.
     """
+    if not client:
+        return "LLM client not initialized. Cannot generate ground truth."
     if not raw_data:
         return "No relevant data found for this query to generate a ground truth."
 
@@ -624,8 +776,8 @@ def generate_ground_truth_from_data(user_question: str, raw_data: list) -> str:
         else:
             # Handle cases where LLM returns no content for ground truth
             finish_reason = gt_response.candidates[0].finish_reason if gt_response.candidates else 'UNKNOWN'
-            st.warning(f"Ground truth generation model returned no content. Finish reason: {finish_reason}")
-            return f"Could not generate ground truth: Model returned no content ({finish_reason})."
+            st.warning(f"Ground truth generation model returned no content. Finish reason: {finish_reason}. Defaulting to empty string.")
+            return "" # Default to empty string if no ground truth generated
     except Exception as e:
         print(f"Error generating ground truth: {e}")
         traceback.print_exc()
@@ -639,10 +791,13 @@ def _check_telecom_relevance(query: str) -> str:
     Determines if a query is related to telecom business metrics.
     Returns "RELEVANT" or "IRRELEVANT".
     """
+    if not client:
+        return "LLM client not initialized. Cannot check relevance."
     try:
         # Simplified prompt with few-shot example for clear output format
         relevance_prompt = f"""
         Is the following user query related to telecom business metrics or KPIs?
+        Allow queries related to metadata or help related such as hi or help , which data you have etc
 
         Query: "{query}"
 
@@ -659,7 +814,7 @@ def _check_telecom_relevance(query: str) -> str:
         Query: "How we are doing in q2?"
         Response: RELEVANT
 
-        Query: "performance score card for this year?"
+        Query: "Performance summary or score card for this year?"
         Response: RELEVANT
 
         Query: "What products you can support?"
@@ -709,64 +864,96 @@ def _check_telecom_relevance(query: str) -> str:
 
 
 # --- New Function: Get Available Metadata ---
-def get_available_metadata_from_neo4j(query: str = None) -> str:
+def get_available_metadata_from_neo4j(metadata_type: str = "all") -> tuple[str, str, dict]:
     """
     Fetches available metrics, product types, service types, regions, and report months/years from Neo4j.
     Converts the fetched data to a more readable format (e.g., title case) before returning.
-    The 'query' parameter is a placeholder to satisfy the Tool's signature; it's not directly used for the Cypher query.
+    The 'metadata_type' parameter allows fetching specific categories of metadata.
+    Valid values for metadata_type: "all", "metrics", "dimensions", "product_types", "service_types", "regions", "time_periods".
+    Returns a tuple: (formatted_response_string, cypher_query_used, metrics_dict)
     """
+    if not driver:
+        st.error("Neo4j driver not initialized. Cannot fetch metadata.")
+        return ("I'm sorry, I couldn't retrieve the available data and dimensions at this time due to a database connection issue.", "", {})
+    
+    response_parts = []
+    cypher_queries_executed = []
+    metadata_metrics = {}
+
     try:
         with driver.session() as session:
-            # Get distinct metric names
-            metrics_query = "MATCH (m:Metric) RETURN DISTINCT m.name AS metricName ORDER BY metricName"
-            metrics_result = session.run(metrics_query)
-            metrics = [record["metricName"].replace('_', ' ').title() for record in metrics_result]
+            if metadata_type == "all" or metadata_type == "metrics":
+                metrics_query = "MATCH (m:Metric) RETURN DISTINCT m.name AS metricName ORDER BY metricName"
+                cypher_queries_executed.append(metrics_query)
+                metrics_result = session.run(metrics_query)
+                metrics = [record["metricName"].replace('_', ' ').title() for record in metrics_result]
+                response_parts.append(f"**Metrics:** {', '.join(metrics) if metrics else 'N/A'}")
+                metadata_metrics["metrics_count"] = len(metrics)
 
-            # Get distinct product types
-            products_query = "MATCH (md:MetricData) RETURN DISTINCT md.product_name AS productName ORDER BY productName"
-            products_result = session.run(products_query)
-            products = [record["productName"].replace('_', ' ').title() for record in products_result]
+            if metadata_type == "all" or metadata_type == "dimensions" or metadata_type == "product_types":
+                products_query = "MATCH (md:MetricData) RETURN DISTINCT md.product_name AS productName ORDER BY productName"
+                cypher_queries_executed.append(products_query)
+                products_result = session.run(products_query)
+                products = [record["productName"].replace('_', ' ').title() for record in products_result]
+                response_parts.append(f"**Product Types:** {', '.join(products) if products else 'N/A'}")
+                metadata_metrics["product_types_count"] = len(products)
 
-            # Get distinct service types
-            services_query = "MATCH (md:MetricData) RETURN DISTINCT md.service_type AS serviceType ORDER BY serviceType"
-            services_result = session.run(services_query)
-            services = [record["serviceType"].replace('_', ' ').title() for record in services_result]
+            if metadata_type == "all" or metadata_type == "dimensions" or metadata_type == "service_types":
+                services_query = "MATCH (md:MetricData) RETURN DISTINCT md.service_type AS serviceType ORDER BY serviceType"
+                cypher_queries_executed.append(services_query)
+                services_result = session.run(services_query)
+                services = [record["serviceType"].replace('_', ' ').title() for record in services_result]
+                response_parts.append(f"**Service Types:** {', '.join(services) if services else 'N/A'}")
+                metadata_metrics["service_types_count"] = len(services)
 
-            # Get distinct regions
-            regions_query = "MATCH (md:MetricData) RETURN DISTINCT md.region AS regionName ORDER BY regionName"
-            regions_result = session.run(regions_query)
-            regions = [record["regionName"].replace('_', ' ').title() for record in regions_result]
+            if metadata_type == "all" or metadata_type == "dimensions" or metadata_type == "regions":
+                regions_query = "MATCH (md:MetricData) RETURN DISTINCT md.region AS regionName ORDER BY regionName"
+                cypher_queries_executed.append(regions_query)
+                regions_result = session.run(regions_query)
+                regions = [record["regionName"].replace('_', ' ').title() for record in regions_result]
+                response_parts.append(f"**Regions:** {', '.join(regions) if regions else 'N/A'}")
+                metadata_metrics["regions_count"] = len(regions)
 
-            # Get distinct report months and years
-            time_query = "MATCH (md:MetricData) RETURN DISTINCT md.rpt_mth AS month, md.rpt_year AS year ORDER BY year DESC, month"
-            time_result = session.run(time_query)
-            time_periods = []
-            for record in time_result:
-                time_periods.append(f"{record['month'].capitalize()} {record['year']}")
+            if metadata_type == "all" or metadata_type == "time_periods":
+                time_query = "MATCH (md:MetricData) RETURN DISTINCT md.rpt_mth AS month, md.rpt_year AS year ORDER BY year DESC, month"
+                cypher_queries_executed.append(time_query)
+                time_result = session.run(time_query)
+                time_periods = []
+                for record in time_result:
+                    time_periods.append(f"{record['month'].capitalize()} {record['year']}")
+                response_parts.append(f"**Available Report Months/Years:** {', '.join(sorted(list(set(time_periods)))) if time_periods else 'N/A'}")
+                metadata_metrics["time_periods_count"] = len(set(time_periods))
 
-            response_string = (
-                "Hello, I am your virtual Agent , I can answer metrics reasoning questions on following data:\n\n"
-                f"**Metrics:** {', '.join(metrics) if metrics else 'N/A'}\n\n"
-                f"**Product Types:** {', '.join(products) if products else 'N/A'}\n\n"
-                f"**Service Types:** {', '.join(services) if services else 'N/A'}\n\n"
-                f"**Regions:** {', '.join(regions) if regions else 'N/A'}\n\n"
-                f"**Available Report Months/Years:** {', '.join(sorted(list(set(time_periods)))) if time_periods else 'N/A'}"
-            )
-            return response_string
+        final_response_string = ""
+        if not response_parts:
+            final_response_string = f"I found no data for the requested metadata type: {metadata_type}."
+        elif metadata_type == "all":
+            final_response_string = "Hello, I am your virtual Agent, I can answer metrics reasoning questions on the following data:\n\n" + "\n\n".join(response_parts)
+        elif metadata_type == "dimensions":
+            # For 'dimensions', we explicitly omit the "Metrics" line if it was included in the common logic
+            dimension_parts = [part for part in response_parts if not part.startswith("**Metrics:**")]
+            final_response_string = "**Supported Dimensions:**\n\n" + "\n\n".join(dimension_parts)
+        else:
+            final_response_string = "\n\n".join(response_parts)
+
+        return final_response_string, "\n\n".join(cypher_queries_executed), metadata_metrics
+
     except Exception as e:
         st.error(f"Failed to fetch available metadata from Neo4j: {e}")
         traceback.print_exc()
-        return "I'm sorry, I couldn't retrieve the available data and dimensions at this time."
+        return ("I'm sorry, I couldn't retrieve the available data and dimensions at this time.", "", {})
 
 # --- NEW Function: Classify Question Type (Simple vs. Reasoning) ---
 def classify_question_type(query: str) -> str:
     """
     Classifies a user query as 'SIMPLE' (direct lookup) or 'REASONING' (requiring analysis/relationships).
     """
+    if not client:
+        return "LLM client not initialized. Cannot classify question."
     prompt = f"""
     Classify the following user query as either "SIMPLE" or "REASONING".
 
-    A "SIMPLE" query asks for a direct metric value for a specific dimension and time period.
+    A "SIMPLE" query asks for a direct metric value for a specific dimension , time period top performing product types, service types,regions,time priod etc.
     A "REASONING" query asks for explanations, comparisons, trends, or relationships between metrics.
 
     Examples:
@@ -779,16 +966,16 @@ def classify_question_type(query: str) -> str:
     Query: "Why did customer churn increase last month?"
     Classification: REASONING
 
-    Query: "Tell me the wireline net adds for March."
+    Query: "Give me top 3 best performing regions for wireless gross adds postpaid in january ?."
     Classification: SIMPLE
 
-    Query: "What is the relationship between ARPU and customer churn?"
-    Classification: REASONING
+    Query: "Tell me the wireline net adds for March."
+    Classification: SIMPLE
 
     Query: "Show me the prepaid wireless gross adds for January 2024 in California."
     Classification: SIMPLE
 
-    Query: "Explain the trends in FWA churn rate over the last year."
+    Query: "Performance summary or score card for q1."
     Classification: REASONING
 
     Query: "{query}"
@@ -813,85 +1000,96 @@ def classify_question_type(query: str) -> str:
         return "REASONING" # Default to reasoning on error
 
 # Define the LangChain Tools
-telecom_relevance_tool = Tool(
-    name="TelecomQueryRelevanceChecker",
-    func=_check_telecom_relevance,
-    description="Checks if a user query is related to telecom business metrics or KPIs. Input should be the user's query as a string. Returns 'RELEVANT' if related, 'IRRELEVANT' otherwise."
-)
+# Ensure agent_llm is initialized before creating tools that use it.
+if agent_llm: # This check relies on the config_ok block above
+    tools = [
+        Tool(
+            name="TelecomQueryRelevanceChecker",
+            func=_check_telecom_relevance,
+            description="Checks if a user query is related to telecom business metrics or KPIs. Input should be the user's query as a string. Returns 'RELEVANT' or 'IRRELEVANT'."
+        ),
+        Tool(
+            name="AvailableMetadataChecker",
+            func=get_available_metadata_from_neo4j,
+            description="Provides information about available data in the database. Can fetch 'all' metadata (default if no specific type is given), 'metrics', 'dimensions', 'product_types', 'service_types', 'regions', or 'time_periods'. Input should be the specific metadata type as a string (e.g., 'dimensions', 'metrics', or 'all'). Use this when the user asks 'what data do you have', 'what metrics are available', 'what dimensions can I query by', etc."
+        ),
+        Tool(
+            name="QuestionClassifier",
+            func=classify_question_type,
+            description="Classifies a user query as 'SIMPLE' (direct metric lookup) or 'REASONING' (requiring analysis of relationships/trends). Input is the user's query string."
+        )
+    ]
 
-metadata_tool = Tool(
-    name="AvailableMetadataChecker",
-    func=get_available_metadata_from_neo4j,
-    description="Provides information about the available metrics, product types, service types, regions, and reporting periods in the database. Use this when the user asks 'what data do you have', 'what metrics are available', 'what dimensions can I query by', etc. Input should be an empty string or a placeholder, as the function queries directly."
-)
+    # Agent prompt: Instructs the agent to use the relevance checker and output its result.
+    agent_prompt_template = PromptTemplate.from_template("""
+    You are an AI assistant whose primary purpose is to answer questions about telecom business metrics and provide available data information.
+    You have access to the following tools:
 
-question_classifier_tool = Tool(
-    name="QuestionClassifier",
-    func=classify_question_type,
-    description="Classifies a user query as 'SIMPLE' (direct metric lookup) or 'REASONING' (requiring analysis of relationships/trends). Input is the user's query string."
-)
+    {tools}
 
-# LangChain Agent Setup
-tools = [telecom_relevance_tool, metadata_tool, question_classifier_tool]
+    Use the following format:
 
-# Agent prompt: Instructs the agent to use the relevance checker and output its result.
-agent_prompt_template = PromptTemplate.from_template("""
-You are an AI assistant whose primary purpose is to answer questions about telecom business metrics and provide available data information.
-You have access to the following tools:
+    Question: the input question you must answer
+    Thought: you should always think about what to do
+    Action: the action to take, should be one of [{tool_names}]
+    Action Input: the input to the action
+    Observation: the result of the action
+    ... (this Thought/Action/Action Input/Observation can repeat N times)
+    Thought: I now know the final answer
+    Final Answer: the final answer from the tool
 
-{tools}
+    Here are the rules for using your tools:
+    1. First, always use the 'TelecomQueryRelevanceChecker' tool to determine if the user's query is RELEVANT to telecom business metrics.
+    2. If the 'TelecomQueryRelevanceChecker' returns "IRRELEVANT", your Final Answer should be ONLY "IRRELEVANT". Do not use any other tools.
+    3. If the 'TelecomQueryRelevanceChecker' returns "RELEVANT", then analyze the user's query further.
+    4. If the RELEVANT query asks about "hi", "help", "what data is available", "what metrics do you have", "what dimensions can I query by", "what regions data we have", or similar questions about the scope of data:
+        a. Determine the *specific type* of metadata the user is asking for (e.g., "metrics", "dimensions", "product types","regions","service", "all").
+        b. Use the 'AvailableMetadataChecker' tool. The Action Input for 'AvailableMetadataChecker' should be the determined metadata type (e.g., 'dimensions', 'metrics', or 'all').
+        c. After observing the result of 'AvailableMetadataChecker', generate the relevant answer from output of 'AvailableMetadataChecker'. This is crucial for consistency.
+    5. If the RELEVANT query is a specific question about metrics or KPIs that requires fetching data (e.g., "what is the churn rate", "how is ARPU performing"), then you must use the 'QuestionClassifier' tool to classify if it is a "SIMPLE" or "REASONING" question.
+        - If 'QuestionClassifier' returns "SIMPLE":
+            Thought: The query is a simple metric lookup. I should signal the main application to handle this.
+            Final Answer: SIMPLE_QUERY
+        - If 'QuestionClassifier' returns "REASONING":
+            Thought: The query requires reasoning and relationship analysis. I should signal the main application to handle this.
+            Final Answer: REASONING_QUERY
 
-Use the following format:
+    Question: {input}
+    {agent_scratchpad}
+    """)
 
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer from the tool
-
-Here are the rules for using your tools:
-1. First, always use the 'TelecomQueryRelevanceChecker' tool to determine if the user's query is RELEVANT to telecom business metrics.
-2. If the 'TelecomQueryRelevanceChecker' returns "IRRELEVANT", your Final Answer should be ONLY "IRRELEVANT". Do not use any other tools.
-3. If the 'TelecomQueryRelevanceChecker' returns "RELEVANT", then analyze the user's query further.
-4. If the RELEVANT query asks about "hi","help","what data is available", "what metrics do you have", "what dimensions are supported", or similar questions about the scope of data:
-    a. Use the 'AvailableMetadataChecker' tool. The Action Input for 'AvailableMetadataChecker' should be an empty string.
-    b. After observing the result of 'AvailableMetadataChecker', your Final Answer should be ONLY "METADATA_QUERY". This signifies that you have provided the requested metadata.
-5. If the RELEVANT query is a specific question about metrics or KPIs that requires fetching data (e.g., "what is the churn rate", "how is ARPU performing"), then you must use the 'QuestionClassifier' tool to classify if it is a "SIMPLE" or "REASONING" question.
-    - If 'QuestionClassifier' returns "SIMPLE":
-        Thought: The query is a simple metric lookup. I should signal the main application to handle this.
-        Final Answer: SIMPLE_QUERY
-    - If 'QuestionClassifier' returns "REASONING":
-        Thought: The query requires reasoning and relationship analysis. I should signal the main application to handle this.
-        Final Answer: REASONING_QUERY
-
-Question: {input}
-{agent_scratchpad}
-""")
-
-# Create the LangChain ReAct Agent
-agent = create_react_agent(agent_llm, tools, agent_prompt_template)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, max_iterations=5)
+    # Create the LangChain ReAct Agent
+    agent = create_react_agent(agent_llm, tools, agent_prompt_template)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True, max_iterations=5)
+else:
+    st.error("LangChain agent could not be initialized due to missing or invalid configurations.")
+    agent_executor = None # Ensure agent_executor is None if not initialized
 
 
 # --- Main Execution Flow ---
 try:
     if user_query:
+        if not agent_executor:
+            st.error("Cannot process query: Agent is not initialized due to configuration issues. Please check your config.py.")
+            # Append user message, but no assistant response for this case
+            st.session_state.chat_history.append({"role": "user", "content": user_query})
+            st.rerun() # Rerun to display error and user message
+
         with st.spinner("Processing your query..."):
             try:
                 # --- Input Guardrail: Validate Query Relevance and Intent using LangChain Agent ---
                 agent_response = agent_executor.invoke({"input": user_query})
 
                 # The agent's final output determines the next step
-                agent_decision = agent_response.get('output', '').strip().upper()
+                agent_decision = agent_response.get('output', '').strip()
 
                 current_answer = ""
                 current_contexts = [] # To store the raw data for Ragas contexts
                 ground_truth_answer = "" # Initialize ground truth
+                cypher_query = ""
+                cypher_metrics = {}
 
-                # Load metrics (moved here to ensure it's always available after relevance check for metric-related queries)
+                # Load metrics (moved here for general availability)
                 metrics_file_path = os.path.join("config", "metrics.json")
                 metric_names = []
                 try:
@@ -901,49 +1099,20 @@ try:
                 except Exception as e:
                     st.error(f"Failed to load metrics.json. Ensure it exists in the config directory. Error: {e}")
                     traceback.print_exc()
-                    # Handle gracefully, agent might still be able to classify
-                    if "METRIC_QUERY" in agent_decision: # Only show error if classification required metrics
-                        current_answer = f"Error: Failed to load metrics.json. {e}"
-                        st.session_state.chat_history.append({"role": "user", "content": user_query})
-                        st.session_state.chat_history.append({"role": "assistant", "content": current_answer})
-                        st.rerun()
-
+                    # If metrics are critical for a subsequent step, you might need to handle this more strictly
 
                 if agent_decision == "IRRELEVANT":
-                    irrelevant_message = "I can only provide information related to telecom business metrics and KPIs. Please rephrase your question to be about these topics."
-                    current_answer = irrelevant_message
-                    # Append both user and assistant messages here
-                    st.session_state.chat_history.append({"role": "user", "content": user_query})
-                    st.session_state.chat_history.append({"role": "assistant", "content": irrelevant_message})
-                    st.warning(irrelevant_message) # Still show as a warning for immediate feedback
+                    current_answer = "I can only provide information related to telecom business metrics and KPIs. Please rephrase your question to be about these topics."
                     # No Ragas data collected for irrelevant queries
-                    st.rerun() # Stop further processing for irrelevant queries
+                    ground_truth_answer = current_answer # For irrelevant queries, the canned response is the ground truth.
 
-                elif agent_decision == "METADATA_QUERY":
-                    final_assistant_message = agent_response.get('output', '').strip()
-                    current_answer = final_assistant_message
-                    st.session_state.chat_history.append({"role": "user", "content": user_query})
-                    st.session_state.chat_history.append({"role": "assistant", "content": final_assistant_message})
-                    # Collect data for Ragas evaluation (no contexts usually for metadata queries)
-                    st.session_state.evaluation_data.append({
-                        "question": user_query,
-                        "answer": current_answer,
-                        "contexts": [], # No direct contexts from DB for metadata answers
-                        "ground_truth": current_answer, # For metadata questions, the answer itself can often serve as ground truth
-                    })
 
-                elif agent_decision in ["SIMPLE_QUERY", "REASONING_QUERY"]:
+                elif agent_decision == "SIMPLE_QUERY" or agent_decision == "REASONING_QUERY":
                     parsed = get_relevant_metrics_and_relationships(user_query, metric_names)
                     extracted_metrics = parsed.get('metrics', [])
 
-                    cypher_query = ""
-                    story = ""
-                    cypher_metrics = {}
-
                     if not extracted_metrics or not isinstance(extracted_metrics, list) or not any(extracted_metrics):
-                        assistant_message_content = "I couldn't extract any relevant telecom metrics from your question. Please make sure your query explicitly mentions metrics I can understand."
-                        current_answer = assistant_message_content
-                        current_contexts = []
+                        current_answer = "I couldn't extract any relevant telecom metrics from your question. Please make sure your query explicitly mentions metrics I can understand."
                         ground_truth_answer = "No telecom metrics extracted from the query."
                     else:
                         if agent_decision == "SIMPLE_QUERY":
@@ -968,51 +1137,62 @@ try:
                                 validation_status = validate_answer_with_ai(user_query, story, results)
 
                                 if "SUCCESS" in validation_status:
-                                    assistant_message_content = story
+                                    current_answer = story
                                 else:
                                     st.warning(f"The generated answer did not pass validation. Validation Notes: {validation_status}")
-                                    assistant_message_content = f"I encountered an issue generating a fully validated answer for your query. Here's what I was able to gather: \n\n{story}\n\n*Validation Note: {validation_status}*"
-                                current_answer = assistant_message_content
+                                    current_answer = f"I encountered an issue generating a fully validated answer for your query. Here's what I was able to gather: \n\n{story}\n\n*Validation Note: {validation_status}*"
                             else:
-                                assistant_message_content = "No relevant data found in the graph based on your query and extracted entities. Try a different query or ensure data exists for these parameters."
-                                current_answer = assistant_message_content
-                                current_contexts = []
+                                current_answer = "No relevant data found in the graph based on your query and extracted entities. Try a different query or ensure data exists for these parameters."
                                 ground_truth_answer = "No data found for this query based on extracted parameters."
                         else:
-                            assistant_message_content = "I couldn't generate a valid Cypher query from your request."
-                            current_answer = assistant_message_content
-                            current_contexts = []
+                            current_answer = "I couldn't generate a valid Cypher query from your request."
                             ground_truth_answer = "Could not generate a Cypher query from the request."
 
-                    # Append user message
-                    st.session_state.chat_history.append({"role": "user", "content": user_query})
-                    # Store cypher_query and cypher_metrics with the assistant's message
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": current_answer, # Use current_answer which holds the final message
-                        "cypher_query": cypher_query if cypher_query else None,
-                        "cypher_metrics": cypher_metrics if cypher_metrics else None
-                    })
-                    # Collect data for Ragas evaluation
-                    st.session_state.evaluation_data.append({
-                        "question": user_query,
-                        "answer": current_answer,
-                        "contexts": current_contexts,
-                        "ground_truth": ground_truth_answer, # Pass the generated ground truth
-                    })
+                else:
+                    # This block is reached when agent_decision is a direct Final Answer from the agent
+                    # (e.g., a metadata query response like "We have data for the following regions...")
+                    current_answer = agent_decision # The agent's final answer is the message to display.
 
-                else: # Fallback for unexpected agent decisions
-                    final_assistant_message = agent_response.get('output', 'I am not sure how to process this query.').strip()
-                    current_answer = final_assistant_message
-                    st.session_state.chat_history.append({"role": "user", "content": user_query})
-                    st.session_state.chat_history.append({"role": "assistant", "content": final_assistant_message})
-                    st.session_state.evaluation_data.append({
-                        "question": user_query,
-                        "answer": current_answer,
-                        "contexts": [],
-                        "ground_truth": f"Unexpected agent decision: {agent_decision}"
-                    })
+                    # Determine metadata_type_requested from the original user query to re-fetch cypher_query and cypher_metrics
+                    metadata_type_requested = "all" # Default
+                    if "regions" in user_query.lower():
+                        metadata_type_requested = "regions"
+                    elif "dimensions" in user_query.lower():
+                        metadata_type_requested = "dimensions"
+                    elif "metrics" in user_query.lower():
+                        metadata_type_requested = "metrics"
+                    elif "product type" in user_query.lower() or "products" in user_query.lower():
+                        metadata_type_requested = "product_types"
+                    elif "service type" in user_query.lower() or "services" in user_query.lower():
+                        metadata_type_requested = "service_types"
+                    elif "time period" in user_query.lower() or "months" in user_query.lower() or "years" in user_query.lower():
+                        metadata_type_requested = "time_periods"
+                    elif "hi" in user_query.lower() or "help" in user_query.lower() or "what data is available" in user_query.lower():
+                        metadata_type_requested = "all"
+                    
+                    # Re-call get_available_metadata_from_neo4j to get the associated Cypher query and metrics
+                    # (The first return value is ignored as current_answer is already set from agent_decision)
+                    _, cypher_query, cypher_metrics = get_available_metadata_from_neo4j(metadata_type_requested)
+                    ground_truth_answer = current_answer # For metadata questions, the answer itself can serve as ground truth.
+                    current_contexts = [] # No raw contexts for metadata queries
 
+                # Append user message
+                st.session_state.chat_history.append({"role": "user", "content": user_query})
+                # Store cypher_query and cypher_metrics with the assistant's message
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": current_answer, # Use current_answer which holds the final message
+                    "cypher_query": cypher_query if cypher_query else None,
+                    "cypher_metrics": cypher_metrics if cypher_metrics else None
+                })
+                # Collect data for Ragas evaluation
+                st.session_state.evaluation_data.append({
+                    "question": user_query,
+                    "answer": current_answer,
+                    "contexts": current_contexts,
+                    "ground_truth": ground_truth_answer, # Pass the generated ground truth
+                })
+                st.rerun() # Rerun immediately after updating chat history
 
             except Exception as e:
                 st.error(f"An unexpected error occurred during agent processing: {e}")
@@ -1026,9 +1206,8 @@ try:
                     "contexts": [],
                     "ground_truth": f"Error occurred during processing: {e}"
                 })
-        st.rerun()
+                st.rerun() # Rerun even on error to display the error message
 
 except Exception as e:
     st.error(f"An error occurred while processing your request: {e}")
     traceback.print_exc()
-

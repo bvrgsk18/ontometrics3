@@ -1,0 +1,296 @@
+[
+  {
+    "source_metric": "Wireline Gross Adds",
+    "target_metric": "Wireline Net Adds",
+    "relationship_type": "causal_positive",
+    "description": "Wireline Gross Adds directly contribute to Wireline Net Adds. An increase in new wireline customers will lead to a proportional increase in net adds, assuming disconnects remain constant."
+  },
+  {
+    "source_metric": "Wireline Disconnects",
+    "target_metric": "Wireline Net Adds",
+    "relationship_type": "causal_negative",
+    "description": "Wireline Disconnects reduce Wireline Net Adds. Every customer who terminates service decreases the net change in wireline subscribers."
+  },
+  {
+    "source_metric": "Wireless Gross Adds",
+    "target_metric": "Wireless Net Adds",
+    "relationship_type": "causal_positive",
+    "description": "Wireless Gross Adds directly contribute to Wireless Net Adds. An increase in new wireless customers will lead to a proportional increase in net adds, assuming disconnects remain constant."
+  },
+  {
+    "source_metric": "Wireless Disconnects",
+    "target_metric": "Wireless Net Adds",
+    "relationship_type": "causal_negative",
+    "description": "Wireless Disconnects reduce Wireless Net Adds. Every customer who terminates service decreases the net change in wireless subscribers."
+  },
+  {
+    "source_metric": "Wireline Net Adds",
+    "target_metric": "Wireline Churn Rate",
+    "relationship_type": "indirect_correlation",
+    "description": "While net adds are a result of churn, a high net adds number generally implies a lower churn rate relative to the customer base. Conversely, a decreasing net adds could be influenced by a rising churn rate."
+  },
+  {
+    "source_metric": "Wireline Disconnects",
+    "target_metric": "Wireline Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Wireline Disconnects are a direct component of Wireline Churn Rate. An increase in disconnects, especially as a percentage of the total customer base, will directly increase the churn rate."
+  },
+  {
+    "source_metric": "Wireless Net Adds",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "indirect_correlation",
+    "description": "Similar to wireline, a high Wireless Net Adds often correlates with a lower Wireless Churn Rate, indicating successful customer retention and acquisition. A declining net adds may signal an increasing churn rate."
+  },
+  {
+    "source_metric": "Wireless Disconnects",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Wireless Disconnects are a direct driver of Wireless Churn Rate. A higher number of wireless customers leaving, relative to the total subscriber base, will directly increase the churn rate."
+  },
+  {
+    "source_metric": "NPS Score",
+    "target_metric": "Wireless Disconnects",
+    "relationship_type": "causal_negative",
+    "description": "A higher NPS Score indicates greater customer loyalty and satisfaction, which should lead to fewer customers choosing to disconnect their service. Promoters are less likely to churn than detractors."
+  },
+  {
+    "source_metric": "QES Score",
+    "target_metric": "Wireless Disconnects",
+    "relationship_type": "causal_negative",
+    "description": "A higher Quality of Experience Score suggests customers are satisfied with the service quality. This satisfaction is likely to reduce the likelihood of them disconnecting their wireless service."
+  },
+  {
+    "source_metric": "Service Related Call Volume",
+    "target_metric": "Customer Trouble Tickets Count",
+    "relationship_type": "positive_correlation",
+    "description": "An increase in service-related issues or customer problems (Customer Trouble Tickets) is likely to drive up the volume of calls to customer service (Service Related Call Volume) as customers seek resolutions."
+  },
+  {
+    "source_metric": "Service Related Call Volume",
+    "target_metric": "QES Score",
+    "relationship_type": "negative_correlation",
+    "description": "A high volume of service-related calls often indicates underlying service issues or dissatisfaction, which can negatively impact the Quality of Experience Score."
+  },
+  {
+    "source_metric": "Sales Related Call Volume",
+    "target_metric": "Wireless Gross Adds",
+    "relationship_type": "positive_correlation",
+    "description": "An increase in sales-related calls suggests higher customer interest in new services or upgrades, which should positively correlate with an increase in Wireless Gross Adds and Wireline Gross Adds."
+  },
+  {
+    "source_metric": "ARPU",
+    "target_metric": "Wireless Net Adds",
+    "relationship_type": "indirect_correlation",
+    "description": "While not a direct cause, a strategy to increase ARPU (e.g., through upselling or premium services) might attract a different customer segment or retain higher-value customers, indirectly influencing net adds. Conversely, high ARPU might deter price-sensitive customers, impacting net adds."
+  },
+  {
+    "source_metric": "Wireless Disconnects with 30 days device change",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "These specific disconnects are a direct component contributing to the overall Wireless Churn Rate. A rise in this metric means more customers are leaving shortly after a device change, thus increasing churn."
+  },
+  {
+    "source_metric": "Wireless Disconnects with 60 days device change",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Similar to the 30-day metric, disconnects occurring within 60 days of a device change are a direct contributor to the Wireless Churn Rate."
+  },
+  {
+    "source_metric": "Wireless Disconnects with 90 days device change",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects happening within 90 days of a device change directly increase the Wireless Churn Rate."
+  },
+  {
+    "source_metric": "Wireless Disconnects with 30 days plan change",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Customers disconnecting within 30 days of a plan change are a direct factor increasing the Wireless Churn Rate. This suggests dissatisfaction with the new plan."
+  },
+  {
+    "source_metric": "Wireless Disconnects with 60 days plan change",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects within 60 days of a plan change directly contribute to the Wireless Churn Rate, indicating potential issues with the plan or its implementation."
+  },
+  {
+    "source_metric": "Wireless Disconnects with 90 days plan change",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects occurring within 90 days of a plan change directly increase the Wireless Churn Rate."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Bill Shock",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects due to bill shock are a direct contributor to the Wireless Churn Rate. Unexpectedly high bills lead to customer dissatisfaction and churn."
+  },
+  {
+    "source_metric": "Wireless Port In",
+    "target_metric": "Wireless Net Adds",
+    "relationship_type": "causal_positive",
+    "description": "Wireless Port Ins are a component of new customer acquisition. An increase in customers porting in their numbers directly increases Wireless Net Adds, assuming other factors remain constant."
+  },
+  {
+    "source_metric": "Wireless Port Out",
+    "target_metric": "Wireless Disconnects",
+    "relationship_type": "causal_positive",
+    "description": "Wireless Port Outs represent customers leaving the service for a competitor. This directly increases Wireless Disconnects."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Promo acceptance 30 days",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects within 30 days of accepting a promo are a direct component of Wireless Churn Rate, indicating the promotion may not have met expectations or was a short-term fix."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Promo acceptance 60 days",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects within 60 days of accepting a promo directly increase the Wireless Churn Rate."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Promo acceptance 90 days",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects occurring within 90 days of accepting a promo directly contribute to the Wireless Churn Rate."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Offer acceptance 30 days",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects within 30 days of accepting an offer are a direct contributor to the Wireless Churn Rate, suggesting the offer was not suitable or compelling enough long-term."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Offer acceptance 60 days",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects within 60 days of accepting an offer directly increase the Wireless Churn Rate."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Offer acceptance 90 days",
+    "target_metric": "Wireless Churn Rate",
+    "relationship_type": "causal_positive",
+    "description": "Disconnects occurring within 90 days of accepting an offer directly contribute to the Wireless Churn Rate."
+  },
+  {
+    "source_metric": "Wireless Net Adds - Add a Line (AAL)",
+    "target_metric": "Wireless Net Adds",
+    "relationship_type": "causal_positive",
+    "description": "Wireless Net Adds - Add a Line (AAL) is a component of the overall Wireless Net Adds. An increase in existing customers adding new lines directly contributes to the total net adds."
+  },
+  {
+    "source_metric": "Wireless Net Adds - New customers",
+    "target_metric": "Wireless Net Adds",
+    "relationship_type": "causal_positive",
+    "description": "Wireless Net Adds - New customers is a primary driver of Wireless Net Adds. An increase in new customers joining the service directly boosts the net adds number."
+  },
+  {
+    "source_metric": "Average Call handling Time - Service",
+    "target_metric": "Service Related Call Volume",
+    "relationship_type": "indirect_correlation",
+    "description": "If the Average Call Handling Time for service increases, it might mean agents are spending more time per call, potentially reducing the total volume of calls they can handle within a period, or it could indicate more complex issues leading to higher volume."
+  },
+  {
+    "source_metric": "Average Call handling Time - Sales",
+    "target_metric": "Sales Related Call Volume",
+    "relationship_type": "indirect_correlation",
+    "description": "An increase in Average Call Handling Time for sales could mean longer sales cycles or more detailed explanations, which may correlate with higher sales volume but also could indicate inefficiencies."
+  },
+  {
+    "source_metric": "Number of Customer Interactions - App",
+    "target_metric": "Number of Customer Interactions",
+    "relationship_type": "causal_positive",
+    "description": "Interactions through the app are a subset of all customer interactions. An increase in app interactions directly contributes to the total number of customer interactions."
+  },
+  {
+    "source_metric": "Number of Customer Interactions - Portal",
+    "target_metric": "Number of Customer Interactions",
+    "relationship_type": "causal_positive",
+    "description": "Interactions through the customer portal are a part of overall customer interactions. An increase in portal interactions contributes directly to the total."
+  },
+  {
+    "source_metric": "Number of Customer Interactions - Call Centers",
+    "target_metric": "Number of Customer Interactions",
+    "relationship_type": "causal_positive",
+    "description": "Customer interactions via call centers are a significant component of total customer interactions. More calls directly increase the overall interaction count."
+  },
+  {
+    "source_metric": "Number of Customer Interactions - Store",
+    "target_metric": "Number of Customer Interactions",
+    "relationship_type": "causal_positive",
+    "description": "Interactions occurring in physical stores contribute to the total customer interaction count. More store visits mean more interactions."
+  },
+  {
+    "source_metric": "Customer Trouble Tickets Count",
+    "target_metric": "Service Related Call Volume",
+    "relationship_type": "causal_positive",
+    "description": "A higher number of customer trouble tickets typically drives customers to contact support, thus increasing the Service Related Call Volume as they seek resolution for these issues."
+  },
+  {
+    "source_metric": "Customer Trouble Tickets - Network Coverage",
+    "target_metric": "Customer Trouble Tickets Count",
+    "relationship_type": "causal_positive",
+    "description": "Network coverage issues are a specific type of trouble ticket. An increase in these tickets directly contributes to the overall Customer Trouble Tickets Count."
+  },
+  {
+    "source_metric": "Customer Trouble Tickets - Call Drop",
+    "target_metric": "Customer Trouble Tickets Count",
+    "relationship_type": "causal_positive",
+    "description": "Call drop issues are a specific category of trouble tickets, and an increase in these tickets will raise the total Customer Trouble Tickets Count."
+  },
+  {
+    "source_metric": "Customer Trouble Tickets - Discount Related",
+    "target_metric": "Customer Trouble Tickets Count",
+    "relationship_type": "causal_positive",
+    "description": "Discounts-related issues are a type of trouble ticket. An increase in these issues directly adds to the Customer Trouble Tickets Count."
+  },
+  {
+    "source_metric": "Customer Trouble Tickets - Slow Net Speed",
+    "target_metric": "Customer Trouble Tickets Count",
+    "relationship_type": "causal_positive",
+    "description": "Slow net speed issues are a specific category of trouble tickets. An increase in these tickets will contribute to the overall Customer Trouble Tickets Count."
+  },
+  {
+    "source_metric": "Number Of Customers with Late Fee Waiver",
+    "target_metric": "Customer Trouble Tickets - Discount Related",
+    "relationship_type": "negative_correlation",
+    "description": "A higher number of late fee waivers might indicate fewer customers are being charged late fees in the first place, potentially reducing the number of discount-related trouble tickets concerning late fees."
+  },
+  {
+    "source_metric": "Number Of Customers with Autopay Discount",
+    "target_metric": "Customer Trouble Tickets - Discount Related",
+    "relationship_type": "negative_correlation",
+    "description": "More customers utilizing autopay discounts suggests smoother payment processes and fewer issues related to billing or discounts, which could lead to fewer discount-related trouble tickets."
+  },
+  {
+    "source_metric": "QES Score",
+    "target_metric": "NPS Score",
+    "relationship_type": "positive_correlation",
+    "description": "A higher Quality of Experience Score generally leads to greater customer satisfaction and loyalty, which in turn positively influences the Net Promoter Score as satisfied customers are more likely to recommend the service."
+  },
+  {
+    "source_metric": "NPS Score",
+    "target_metric": "Wireless Gross Adds",
+    "relationship_type": "positive_correlation",
+    "description": "A high NPS score indicates customers are likely to recommend the service, which can drive new customer acquisition through word-of-mouth, positively impacting Wireless Gross Adds."
+  },
+  {
+    "source_metric": "Wireless Disconnects with 30 days plan change",
+    "target_metric": "Wireless Disconnects with 60 days plan change",
+    "relationship_type": "positive_correlation",
+    "description": "If customers are dissatisfied with plan changes leading to disconnects within 30 days, it's probable that a similar dissatisfaction will extend to disconnects within 60 days, indicating a systemic issue with plan implementation or customer expectation management."
+  },
+  {
+    "source_metric": "Wireless Disconnects with Bill Shock",
+    "target_metric": "Service Related Call Volume",
+    "relationship_type": "causal_positive",
+    "description": "Customers experiencing bill shock are likely to contact customer service to understand or dispute their bills, directly increasing Service Related Call Volume."
+  },
+  {
+    "source_metric": "Customer Trouble Tickets - Slow Net Speed",
+    "target_metric": "QES Score",
+    "relationship_type": "negative_correlation",
+    "description": "Persistent issues with slow net speeds directly degrade the customer's quality of experience, leading to a lower QES Score."
+  }
+]

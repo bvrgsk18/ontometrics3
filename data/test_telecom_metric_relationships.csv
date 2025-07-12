@@ -1,5 +1,25 @@
 metric_a,relationship_type,metric_b,reasoning
-Wireless Port Out,increases the value of,Wireless Churn Rate,"When more customers transfer their phone number to another carrier (Wireless Port Out), the percentage of subscribers who cancel or did not renew their subscriptions (Wireless Churn Rate) increases."
-Wireless Port In,positively impacts,Wireless Net Adds - New customers,"When more new customers transfer their existing phone number from another carrier (Wireless Port In), the net increase in new wireless customers (Wireless Net Adds - New customers) is positively impacted."
-Average Call handling Time - Service,negatively impacts,NPS Score,"Longer call handling times (Average Call handling Time - Service) can lead to customer dissatisfaction, negatively impacting the Net Promoter Score (NPS Score)."
-Wireless Net Adds - Add a Line (AAL),positively impacts,Wireless Net Adds,"When existing customers add new lines to their accounts (Wireless Net Adds - Add a Line), the net change in wireless subscribers (Wireless Net Adds) increases."
+Wireless Net Adds New customers,positively impacts,Wireless Net Adds,New customers directly contribute to the overall net adds.
+Wireless Net Adds AAL,positively impacts,Wireless Net Adds,Additional lines by existing customers contribute to the overall net adds.
+Wireless Port Out,increases the value of,Wireless Churn Rate,More port outs lead to higher churn.
+Wireless Net Adds,decreases the value of,Wireless Churn Rate,"More net adds often reflect improved retention, reducing churn rate."
+Number Of Customers with Autopay Discount,decreases the value of,Wireless Churn Rate,"Autopay customers are more stable, reducing churn."
+Number Of Customers with Autopay Discount,decreases the value of,Wireless Port Out,"Autopay users are more loyal, less likely to port out."
+NPS Score,inversely proportional to,Wireless Churn Rate,"High NPS reflects satisfaction, leading to lower churn. Lower NPS score indicates dissatisfaction, leading to higher churn."
+Average Call handling Time - Service,directly proportional to,Wireless Churn Rate,"If average call handling for service related call increases, customer dissatisfaction increases and churn rate increases."
+Wireless Net Adds,decreases the value of,Wireless Churn Rate,"More net adds often reflect improved retention, reducing churn rate."
+Wireless Port In,positively impacts,Wireless Net Adds,Port-ins directly contribute to the overall net adds.
+Wireless Port In,negatively impacts,Wireless Churn Rate,Higher port-ins can indirectly decrease churn by improving the overall customer base.
+NPS Score,positively impacts,Wireless Net Adds,"Higher NPS scores indicate satisfied customers who are more likely to recommend the service, leading to potential growth in net adds."
+Wireless Net Adds New customers,positively impacts,ARPA,New customers contribute to the revenue base which impacts ARPA.
+Wireless Net Adds AAL,positively impacts,ARPA,"Additional lines increase revenue, thus impacting ARPA."
+Wireless Port Out,negatively impacts,ARPA,"Port outs reduce the revenue base, thus impacting ARPA."
+Wireless Port In,positively impacts,ARPA,"Port-ins increase the revenue base, thus impacting ARPA."
+Average Call handling Time - Service,negatively impacts,NPS Score,"Longer call handling times may indicate service issues, leading to lower NPS scores."
+Wireless Net Adds,positively impacts,ARPA,"Higher net adds increase the customer base, impacting ARPA."
+Wireless Churn Rate,negatively impacts,ARPA,"Churn reduces the revenue base, thus impacting ARPA."
+Wireless Net Adds,positively impacts,Number Of Customers with Autopay Discount,Net adds increase the potential customer base for autopay enrollment.
+Wireless Churn Rate,negatively impacts,Number Of Customers with Autopay Discount,Higher churn reduces the number of customers eligible for autopay discounts.
+Wireless Port Out,negatively impacts,Wireless Net Adds,Port outs directly reduce net adds.
+Number Of Customers with Autopay Discount,positively impacts,NPS Score,Customers enrolled in autopay might have higher satisfaction levels.
+Number Of Customers with Autopay Discount,negatively impacts,Average Call handling Time - Service,Autopay customers might require less service-related calls.
